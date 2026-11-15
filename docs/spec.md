@@ -1,4 +1,4 @@
-# brilliant-dev-cycle: spec v0.3 (draft for review)
+# brilliant-dev-cycle: spec v0.4 (draft for review)
 
 ## What it is
 A standalone repo that ships a Herdr app layout (plus its mods) and an orchestrator process.
@@ -110,7 +110,13 @@ verify:
 prompts, limits) lives in a separate config pack, never in this public repo.
 
 ## Layout (Herdr mods)
-Spec review · Phase DAG · Verification config · Reviewers · PM chat dock.
+Progress · Spec review · Phase DAG · Verification config · Reviewers · PM chat dock.
+**Progress view** (the default panel during a run): a stage bar (Spec → Phases → Build → Final review → PR)
+with the current stage highlighted, then the DAG colored by status (done, in progress, blocked on a question,
+queued for an env slot, not started). Each running phase shows its current step (env up, tasks n/m, review,
+verify attempt k), and the header shows totals (phases done/total, tasks done/total, open questions). It reads
+`runs/<id>/state.json` only.
+
 The mods watch `.herd/` with `watchFolder`, and they write comments and answers back as files. No extra server.
 
 ## Local mode and hosted mode
