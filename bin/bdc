@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Local entrypoint so `bdc` works before the package is installed globally.
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+exec node "$ROOT/dist/cli.js" "$@"

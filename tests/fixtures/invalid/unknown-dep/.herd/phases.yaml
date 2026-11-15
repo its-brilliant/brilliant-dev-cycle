@@ -1,0 +1,6 @@
+phases:
+  - id: a
+    title: A
+    deps: [missing]
+    tasks:
+      - One

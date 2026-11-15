@@ -1,0 +1,21 @@
+agents:
+  default: claude
+  roles:
+    spec: claude
+    planner: claude
+    worker: codex
+    pm: claude
+    reviewer: opencode
+concurrency: 1
+max_envs: 1
+max_attempts: 1
+reviewers:
+  security:
+    block_on: high
+keep_envs: false
+pr_targets: []
+verify:
+  setup: ./scripts/verify-setup.sh
+  setup_md: docs/verify.md
+  checks:
+    - run: pnpm test

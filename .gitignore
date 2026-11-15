@@ -1,2 +1,8 @@
-.herd/runs/
 node_modules/
+dist/
+dist-test/
+*.tsbuildinfo
+
+# Run state and logs may contain secrets. Ignore them in every project tree.
+.herd/runs/
+**/.herd/runs/

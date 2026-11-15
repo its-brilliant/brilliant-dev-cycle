@@ -1,0 +1,67 @@
+phases:
+  - id: model
+    title: Note model
+    deps: []
+    tasks:
+      - id: schema
+        title: Define the note schema
+      - id: store
+        title: Store notes as files
+    env:
+      up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+      down: "./scripts/env-down.sh ${PHASE_ID}"
+    verify:
+      setup: ./scripts/verify-setup.sh
+      checks:
+        - run: pnpm test
+      evidence:
+        - junit.xml
+  - id: api
+    title: Export API
+    deps:
+      - model
+    tasks:
+      - Add CSV export
+    env:
+      up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+      down: "./scripts/env-down.sh ${PHASE_ID}"
+    verify:
+      setup_md: docs/verify.md
+      checks:
+        - run: pnpm test
+        - run: "./scripts/e2e.sh ${ENV_URL}"
+      evidence:
+        - junit.xml
+  - id: ui
+    title: Export button
+    deps:
+      - model
+    tasks:
+      - id: button
+        title: Add the export button
+    env:
+      up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+      down: "./scripts/env-down.sh ${PHASE_ID}"
+    verify:
+      checks:
+        - agent: "Open ${ENV_URL} and confirm the export button downloads a CSV"
+      evidence:
+        - screenshots/
+  - id: ship
+    title: Wire export
+    deps:
+      - api
+      - ui
+    tasks:
+      - Connect the button to the API
+    env:
+      up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+      down: "./scripts/env-down.sh ${PHASE_ID}"
+    verify:
+      setup: ./scripts/verify-setup.sh
+      checks:
+        - run: pnpm test
+        - agent: "Open ${ENV_URL} and confirm the export button downloads a CSV"
+      evidence:
+        - junit.xml
+        - screenshots/
