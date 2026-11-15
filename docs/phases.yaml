@@ -1,0 +1,82 @@
+# Build plan for brilliant-dev-cycle itself (dogfood). Each phase verifies itself.
+phases:
+  - id: p1-core
+    title: Repo, config and file model
+    deps: []
+    tasks:
+      - Repo scaffold (Rust or TS CLI decided in spec review), CI, lint, release
+      - bdc.yaml parser with agent roles and validation
+      - .herd/ file model, versioned spec, comments jsonl, run state
+    verify:
+      checks: [{ run: "make test" }, { run: "bdc validate examples/demo" }]
+
+  - id: p2-herdr-bridge
+    title: Herdr socket client
+    deps: [p1-core]
+    tasks:
+      - Socket client (agent.start, agent.prompt with wait, events.subscribe)
+      - Worktree per task (worktree.create and remove)
+      - Agent-agnostic launcher from Herdr agent manifests plus custom commands
+    verify:
+      checks: [{ run: "make test-integration" }]   # starts two fake agents in a headless Herdr
+
+  - id: p3-spec-plan
+    title: Spec and phase stages
+    deps: [p1-core, p2-herdr-bridge]
+    tasks:
+      - Spec agent grill loop and comment replies
+      - Planner agent writes and validates phases.yaml (DAG has no cycles)
+    verify:
+      checks: [{ run: "make e2e-spec" }]
+
+  - id: p4-orchestrator
+    title: DAG runner, env, review, verify
+    deps: [p2-herdr-bridge]
+    tasks:
+      - DAG scheduler with concurrency and parking blocked phases
+      - Env up/down hooks and verify runner with retries and evidence
+      - Reviewer round and fix loop
+      - PM question queue
+    verify:
+      checks: [{ run: "make e2e-dag" }]   # sample 3-phase project end to end with fake agents
+
+  - id: p5-layout
+    title: Herdr layout and mods
+    deps: [p1-core]
+    tasks:
+      - Spec review mod (inline comments)
+      - Phase DAG mod
+      - Verification config and reviewers mods
+      - PM chat dock mod
+    verify:
+      checks: [{ run: "herdr-app check mods/*" }]
+
+  - id: p6-pr-publish
+    title: Final gate, PR, publish
+    deps: [p3-spec-plan, p4-orchestrator, p5-layout]
+    tasks:
+      - Final review and verify round, then PR with evidence
+      - Package and publish as a Herdr layout
+    verify:
+      checks: [{ run: "make e2e-full" }]
+
+  - id: p7-hosted-readiness
+    title: Make sessions sync-ready (hosted mode groundwork)
+    deps: [p4-orchestrator]
+    tasks:
+      - Append-only event log plus snapshots for .herd/runs
+      - Session export and import (push a local session elsewhere)
+    verify:
+      checks: [{ run: "make test-replay" }]   # replaying the event log rebuilds identical state
+
+  - id: p8-hosted
+    title: Hosted mode on Cloudflare (self-hostable)
+    deps: [p7-hosted-readiness, p5-layout]
+    tasks:
+      - Worker API and pluggable auth (GitHub OAuth default)
+      - Session Durable Object (event log, WebSocket fan-out) plus D1 membership
+      - R2 evidence storage and signed downloads
+      - Mods connect to a hosted session (same UI as local), share button and roles
+      - One-command deploy (wrangler) and docs
+    verify:
+      checks: [{ run: "make e2e-hosted" }]   # deploy to a preview env, two users, viewer is read-only
