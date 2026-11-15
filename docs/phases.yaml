@@ -44,6 +44,7 @@ phases:
     title: Herdr layout and mods
     deps: [p1-core]
     tasks:
+      - Progress mod (stage bar, DAG status, current step per phase)
       - Spec review mod (inline comments)
       - Phase DAG mod
       - Verification config and reviewers mods
