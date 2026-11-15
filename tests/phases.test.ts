@@ -44,10 +44,14 @@ phases:
     title: A
     deps: [b, missing]
     tasks: ["one"]
+    env: { up: ./up.sh, down: ./down.sh }
+    verify: { checks: [{ run: pnpm test }] }
   - id: b
     title: B
     deps: [a, a]
     tasks: ["two"]
+    env: { up: ./up.sh, down: ./down.sh }
+    verify: { checks: [{ run: pnpm test }] }
 `);
   assert.deepEqual(lines(parsed.issues), [
     '.herd/phases.yaml: phases[1].deps[1]: duplicate dependency "a"',
@@ -63,10 +67,14 @@ phases:
     title: A
     deps: [a]
     tasks: ["one"]
+    env: { up: ./up.sh, down: ./down.sh }
+    verify: { checks: [{ run: pnpm test }] }
   - id: a
     title: Again
     deps: []
     tasks: ["two"]
+    env: { up: ./up.sh, down: ./down.sh }
+    verify: { checks: [{ run: pnpm test }] }
 `);
   assert.deepEqual(lines(parsed.issues), [
     '.herd/phases.yaml: phases[1].id: duplicate phase id "a"',
@@ -81,16 +89,57 @@ phases:
     title: C
     deps: [a]
     tasks: ["c"]
+    env: { up: ./up.sh, down: ./down.sh }
+    verify: { checks: [{ run: pnpm test }] }
   - id: b
     title: B
     deps: [c]
     tasks: ["b"]
+    env: { up: ./up.sh, down: ./down.sh }
+    verify: { checks: [{ run: pnpm test }] }
   - id: a
     title: A
     deps: [b]
     tasks: ["a"]
+    env: { up: ./up.sh, down: ./down.sh }
+    verify: { checks: [{ run: pnpm test }] }
 `);
   assert.deepEqual(lines(parsed.issues), [
     '.herd/phases.yaml: phases: cycle detected: a -> b -> c -> a',
+  ]);
+});
+
+test('requires env and verify on every phase', () => {
+  const missingEnv = parsePhasesYaml(`
+phases:
+  - id: p1
+    title: One
+    deps: []
+    tasks: ["work"]
+    verify:
+      checks: [{ run: pnpm test }]
+`);
+  assert.deepEqual(lines(missingEnv.issues), ['.herd/phases.yaml: phases[0].env: required']);
+
+  const missingVerify = parsePhasesYaml(`
+phases:
+  - id: p1
+    title: One
+    deps: []
+    tasks: ["work"]
+    env: { up: ./up.sh, down: ./down.sh }
+`);
+  assert.deepEqual(lines(missingVerify.issues), ['.herd/phases.yaml: phases[0].verify: required']);
+
+  const missingBoth = parsePhasesYaml(`
+phases:
+  - id: p1
+    title: One
+    deps: []
+    tasks: ["work"]
+`);
+  assert.deepEqual(lines(missingBoth.issues), [
+    '.herd/phases.yaml: phases[0].env: required',
+    '.herd/phases.yaml: phases[0].verify: required',
   ]);
 });

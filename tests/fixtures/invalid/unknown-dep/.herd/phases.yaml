@@ -4,3 +4,9 @@ phases:
     deps: [missing]
     tasks:
       - One
+    env:
+      up: ./scripts/env-up.sh
+      down: ./scripts/env-down.sh
+    verify:
+      checks:
+        - run: pnpm test

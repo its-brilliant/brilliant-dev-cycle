@@ -10,8 +10,10 @@ export interface Phase {
   title: string;
   deps: string[];
   tasks: PhaseTask[];
-  env?: EnvConfig;
-  verify?: VerifyConfig;
+  /** Every phase brings up its own side env before tasks run. */
+  env: EnvConfig;
+  /** A phase must pass verify before dependents start. */
+  verify: VerifyConfig;
 }
 
 /** A line-anchored comment or reply in `comments/spec.vN.jsonl`. */

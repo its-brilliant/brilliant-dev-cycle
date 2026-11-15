@@ -7,6 +7,9 @@ phases:
       - Repo scaffold (Rust or TS CLI decided in spec review), CI, lint, release
       - bdc.yaml parser with agent roles and validation
       - .herd/ file model, versioned spec, comments jsonl, run state
+    env:
+      up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+      down: "./scripts/env-down.sh ${PHASE_ID}"
     verify:
       checks: [{ run: "make test" }, { run: "bdc validate examples/demo" }]
 
@@ -17,6 +20,9 @@ phases:
       - Socket client (agent.start, agent.prompt with wait, events.subscribe)
       - Worktree per task (worktree.create and remove)
       - Agent-agnostic launcher from Herdr agent manifests plus custom commands
+    env:
+      up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+      down: "./scripts/env-down.sh ${PHASE_ID}"
     verify:
       checks: [{ run: "make test-integration" }]   # starts two fake agents in a headless Herdr
 
@@ -26,6 +32,9 @@ phases:
     tasks:
       - Spec agent grill loop and comment replies
       - Planner agent writes and validates phases.yaml (DAG has no cycles)
+    env:
+      up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+      down: "./scripts/env-down.sh ${PHASE_ID}"
     verify:
       checks: [{ run: "make e2e-spec" }]
 
@@ -37,6 +46,9 @@ phases:
       - Env up/down hooks and verify runner with retries and evidence
       - Reviewer round and fix loop
       - PM question queue
+    env:
+      up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+      down: "./scripts/env-down.sh ${PHASE_ID}"
     verify:
       checks: [{ run: "make e2e-dag" }]   # sample 3-phase project end to end with fake agents
 
@@ -49,6 +61,9 @@ phases:
       - Phase DAG mod
       - Verification config and reviewers mods
       - PM chat dock mod
+    env:
+      up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+      down: "./scripts/env-down.sh ${PHASE_ID}"
     verify:
       checks: [{ run: "herdr-app check mods/*" }]
 
@@ -58,6 +73,9 @@ phases:
     tasks:
       - Final review and verify round, then PR with evidence
       - Package and publish as a Herdr layout
+    env:
+      up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+      down: "./scripts/env-down.sh ${PHASE_ID}"
     verify:
       checks: [{ run: "make e2e-full" }]
 
@@ -67,6 +85,9 @@ phases:
     tasks:
       - Append-only event log plus snapshots for .herd/runs
       - Session export and import (push a local session elsewhere)
+    env:
+      up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+      down: "./scripts/env-down.sh ${PHASE_ID}"
     verify:
       checks: [{ run: "make test-replay" }]   # replaying the event log rebuilds identical state
 
@@ -79,5 +100,8 @@ phases:
       - R2 evidence storage and signed downloads
       - Mods connect to a hosted session (same UI as local), share button and roles
       - One-command deploy (wrangler) and docs
+    env:
+      up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+      down: "./scripts/env-down.sh ${PHASE_ID}"
     verify:
       checks: [{ run: "make e2e-hosted" }]   # deploy to a preview env, two users, viewer is read-only

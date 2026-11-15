@@ -28,6 +28,8 @@ test('invalid fixtures report the field path', () => {
     cycle: ['.herd/phases.yaml: phases: cycle detected: a -> b -> a'],
     'unknown-dep': ['.herd/phases.yaml: phases[0].deps[0]: unknown phase "missing"'],
     'check-both': ['.herd/phases.yaml: phases[0].verify.checks[0]: set exactly one of run or agent'],
+    'missing-env': ['.herd/phases.yaml: phases[0].env: required'],
+    'missing-verify': ['.herd/phases.yaml: phases[0].verify: required'],
     'bad-comment': [
       '.herd/comments/spec.v1.jsonl: id c2: parent_id "missing" does not match a comment',
     ],

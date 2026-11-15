@@ -88,8 +88,8 @@ function parsePhase(
   const parsedDeps = parseDeps(obj, file, path, issues);
   const tasks = parseTasks(obj, file, path, issues);
   if (id && !duplicate) graph.push({ index, id, deps: parsedDeps.deps });
-  const env = parseOptional(obj, 'env', file, path, issues, parseEnv);
-  const verify = parseOptional(obj, 'verify', file, path, issues, parseVerify);
+  const env = requireBlock(obj, 'env', file, path, issues, parseEnv);
+  const verify = requireBlock(obj, 'verify', file, path, issues, parseVerify);
 
   if (
     !id ||
@@ -103,10 +103,7 @@ function parsePhase(
     return undefined;
   }
 
-  const phase: Phase = { id, title, deps: parsedDeps.deps, tasks };
-  if (env) phase.env = env;
-  if (verify) phase.verify = verify;
-  return phase;
+  return { id, title, deps: parsedDeps.deps, tasks, env, verify };
 }
 
 function parseDeps(
@@ -240,17 +237,21 @@ function requireField<T>(
   return parse(obj[key], file, path, issues);
 }
 
-function parseOptional<T>(
+function requireBlock<T>(
   obj: Record<string, unknown>,
   key: 'env' | 'verify',
   file: string,
   base: string,
   issues: Issue[],
   parse: (value: unknown, file: string, path: string, issues: Issue[]) => T | undefined,
-): T | undefined | 'invalid' {
-  if (!hasOwn(obj, key)) return undefined;
+): T | 'invalid' {
+  const path = joinPath(base, key);
+  if (!hasOwn(obj, key)) {
+    push(issues, file, path, 'required');
+    return 'invalid';
+  }
   const before = issues.length;
-  const parsed = parse(obj[key], file, joinPath(base, key), issues);
+  const parsed = parse(obj[key], file, path, issues);
   if (parsed === undefined || issues.length > before) return 'invalid';
   return parsed;
 }

@@ -1,6 +1,7 @@
 import { expectId, expectInt, expectRecord, expectString, hasOwn, unknownFields } from '../fields.js';
 import { push, type Issue } from '../issues.js';
 import { isIsoUtc } from '../time.js';
+import { findCycles } from './phases.js';
 import type { LineComment } from './types.js';
 
 const COMMENT_KEYS = ['id', 'line', 'author', 'body', 'parent_id', 'created_at'] as const;
@@ -48,6 +49,7 @@ export function parseComments(
   }
 
   const known = new Set(comments.map((comment) => comment.id));
+  const parentOf = new Map<string, string>();
   for (const comment of comments) {
     if (comment.parent_id === null) continue;
     if (comment.parent_id === comment.id) {
@@ -61,7 +63,18 @@ export function parseComments(
         `id ${comment.id}`,
         `parent_id ${JSON.stringify(comment.parent_id)} does not match a comment`,
       );
+      continue;
     }
+    parentOf.set(comment.id, comment.parent_id);
+  }
+
+  const cycles = findCycles([...parentOf.keys()], (id) => {
+    const parent = parentOf.get(id);
+    return parent ? [parent] : [];
+  });
+  for (const cycle of cycles) {
+    const start = cycle[0] ?? '';
+    push(issues, file, `id ${start}`, `parent_id cycle: ${cycle.join(' -> ')}`);
   }
 
   if (issues.length > 0) return { comments: null, issues };

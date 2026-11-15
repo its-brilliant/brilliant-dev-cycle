@@ -15,6 +15,8 @@ const phases: Phase[] = [
       { id: 'schema', title: 'Schema' },
       { id: 'store', title: 'Store' },
     ],
+    env: { up: './up.sh', down: './down.sh' },
+    verify: { checks: [{ kind: 'run', run: 'pnpm test' }], evidence: [] },
   },
 ];
 
@@ -31,6 +33,27 @@ test('parses line comments and replies', () => {
   assert.deepEqual(lines(parsed.issues), []);
   assert.equal(parsed.comments?.length, 2);
   assert.equal(parsed.comments?.[1]?.parent_id, 'c1');
+});
+
+test('rejects a parent_id reply cycle and keeps the self-reference error', () => {
+  const cycle = parseComments(
+    [
+      '{"id":"c1","line":1,"author":"ada","body":"A","parent_id":"c2"}',
+      '{"id":"c2","line":1,"author":"ada","body":"B","parent_id":"c1"}',
+    ].join('\n'),
+    '.herd/comments/spec.v1.jsonl',
+  );
+  assert.deepEqual(lines(cycle.issues), [
+    '.herd/comments/spec.v1.jsonl: id c1: parent_id cycle: c1 -> c2 -> c1',
+  ]);
+
+  const self = parseComments(
+    '{"id":"c1","line":1,"author":"ada","body":"A","parent_id":"c1"}\n',
+    '.herd/comments/spec.v1.jsonl',
+  );
+  assert.deepEqual(lines(self.issues), [
+    '.herd/comments/spec.v1.jsonl: id c1: parent_id refers to itself',
+  ]);
 });
 
 test('reports comment failures with the jsonl line', () => {
