@@ -1,6 +1,3 @@
-#!/usr/bin/env node
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { UNIMPLEMENTED_PHASES } from './later.js';
 import { formatIssue } from './issues.js';
 import { validateProject } from './project.js';
@@ -45,9 +42,4 @@ export function main(argv: readonly string[]): number {
   }
   for (const issue of issues) console.error(formatIssue(issue, dir));
   return 1;
-}
-
-const invoked = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : '';
-if (invoked === import.meta.url) {
-  process.exit(main(process.argv));
 }

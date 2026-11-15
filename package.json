@@ -9,7 +9,7 @@
     "node": ">=22"
   },
   "bin": {
-    "bdc": "dist/cli.js"
+    "bdc": "dist/main.js"
   },
   "exports": {
     ".": "./dist/index.js"

@@ -15,8 +15,7 @@ Node.js 22 or newer.
 ```sh
 npm ci
 make test
-export PATH="$PWD/bin:$PATH"
-bdc validate examples/demo
+./bin/bdc validate examples/demo
 ```
 
 `make lint` typechecks and runs ESLint. `make test` runs the unit tests and validates `examples/demo`.
