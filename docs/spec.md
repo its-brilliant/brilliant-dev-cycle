@@ -151,7 +151,7 @@ snapshots). Hosted mode comes after, as its own spec.
 - Side envs can stay up when `keep_envs` is set. The default is tear down on pass.
 - Reviewers can block, with a per-reviewer severity threshold. An operator can override a block from the ship screen; the override (who, which reviewer, reason) is written into the PR evidence.
 - License: Apache-2.0.
-- Repo name: `brilliant-dev-cycle`, public, Apache-2.0 or MIT.
+- Repo name: `brilliant-dev-cycle`, public.
 - Hosted mode is a separate self-hostable service, targeting Cloudflare (Workers, Durable Objects, D1, R2).
 
 ## Open questions
