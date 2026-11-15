@@ -1,0 +1,23 @@
+phases:
+  - id: a
+    title: A
+    deps: [b]
+    tasks:
+      - One
+    env:
+      up: ./scripts/env-up.sh
+      down: ./scripts/env-down.sh
+    verify:
+      checks:
+        - run: pnpm test
+  - id: b
+    title: B
+    deps: [a]
+    tasks:
+      - Two
+    env:
+      up: ./scripts/env-up.sh
+      down: ./scripts/env-down.sh
+    verify:
+      checks:
+        - run: pnpm test

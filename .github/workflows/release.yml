@@ -1,0 +1,29 @@
+name: release
+
+# Stub. p1-core builds and tests a tag. Publishing the Herdr layout is later.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: make test
+      # TODO(p6-pr-publish): publish the Herdr layout bundle and attach CLI artifacts.
+      - name: Release stub
+        run: |
+          echo "p1-core release stub: build and test passed."
+          echo "Publishing is not implemented in this phase."

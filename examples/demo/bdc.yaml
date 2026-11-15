@@ -1,0 +1,46 @@
+# Example project config. Scripts are not run in p1; validate only checks their shape.
+agents:
+  default: claude
+  roles:
+    spec: claude
+    planner: claude
+    worker: codex
+    pm: claude
+    reviewer: opencode
+    docs:
+      command: my-agent --yolo
+      herdr_manifest: null
+  custom:
+    my-agent:
+      command: my-agent --yolo
+      herdr_manifest: null
+concurrency: 4
+max_envs: 2
+max_attempts: 3
+reviewers:
+  security:
+    block_on: high
+  perf:
+    block_on: high
+  ux:
+    block_on: none
+keep_envs: false
+pr_targets:
+  - provider: github
+    repo: example/notes
+    base: main
+    draft: true
+  - provider: gitlab
+    project: example/notes
+    base: main
+env:
+  up: "./scripts/env-up.sh ${PHASE_ID} ${BRANCH}"
+  down: "./scripts/env-down.sh ${PHASE_ID}"
+verify:
+  setup: ./scripts/verify-setup.sh
+  checks:
+    - run: pnpm test
+    - agent: "Open ${ENV_URL} and confirm the export button downloads a CSV"
+  evidence:
+    - junit.xml
+    - screenshots/

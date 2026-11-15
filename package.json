@@ -1,0 +1,42 @@
+{
+  "name": "bdc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "brilliant-dev-cycle orchestrator CLI (p1-core)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "bdc": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/its-brilliant/brilliant-dev-cycle"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "test": "tsc -p tsconfig.test.json && node --test --test-reporter=spec dist-test/tests/*.test.js",
+    "lint": "tsc -p tsconfig.json --noEmit && eslint ."
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^22.19.0",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.3"
+  }
+}
