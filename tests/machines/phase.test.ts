@@ -383,6 +383,24 @@ describe('phaseMachine', () => {
     });
   });
 
+  it('a fix for a builder whose session ended goes to a fresh builder on the same task branch', async () => {
+    const h = harness();
+    await h.at('building');
+    await h.until(() => h.agentIds().length === 2, 'builders');
+    h.failed('builder-t1', 'the terminal exited');
+    await h.at('deciding');
+    h.send({ type: 'PM_DECISION', decision: { action: 'fix', reason: 'retry it', instructions: 'finish the task', builder: 't1' } });
+    await h.at('fixing');
+    await h.until(() => h.spawned.some((job) => job.key === 'r1/p1/t1/builder/r1'), 'a fresh t1 builder');
+    const fresh = h.spawned.find((job) => job.key === 'r1/p1/t1/builder/r1');
+    expect(fresh?.cwd).toBe(h.spawned.find((job) => job.key === 'r1/p1/t1/builder')?.cwd);
+    expect(fresh?.prompt).toContain('finish the task');
+    // Nothing is sent into the session that is gone.
+    expect(h.followUpsTo('r1/p1/t1/builder')).toHaveLength(0);
+    h.done('builder-t1-r1');
+    await h.at('merging');
+  });
+
   it('a phase branch that cannot merge into the run branch goes to the PM as a conflict', async () => {
     const h = harness({
       merge: (merge) =>

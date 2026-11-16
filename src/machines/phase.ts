@@ -307,6 +307,11 @@ function labels(context: PhaseContext, role: string, key: string, task?: string)
   };
 }
 
+/** `r1/p1/t1/builder/r2` → `r1/p1/t1/builder`: fresh builders of a task are numbered off its first key. */
+function baseBuilderKey(key: string): string {
+  return key.replace(/\/r\d+$/, '');
+}
+
 function builderJob(context: PhaseContext, task: PhaseTask): AgentJob {
   const planned = context.phase.tasks.find((candidate) => candidate.id === task.id);
   const paths = planned && planned.paths.length > 0 ? ` Expected paths: ${planned.paths.join(', ')}.` : '';
@@ -795,9 +800,25 @@ export const phaseMachine = setup({
       const task = taskOf(context, context.fixTask);
       const decision = context.decision;
       if (task === undefined || decision === null || decision.action !== 'fix') return;
-      if (childOf(context, task.builderId) === undefined) return;
+      const builder = childOf(context, task.builderId);
+      if (builder === undefined) return;
       enqueue.assign({ fixSent: () => true });
-      enqueue.sendTo(task.builderId, { type: 'FOLLOW_UP', prompt: decision.instructions });
+      if (builder.live) {
+        // §3.1: the fix goes into the session that wrote the code, so its context and cache are reused.
+        enqueue.sendTo(task.builderId, { type: 'FOLLOW_UP', prompt: decision.instructions });
+        return;
+      }
+      // That session has ended (its turn failed). A fresh builder takes the fix on the same task branch.
+      // attemptsUsed already counts this fix (it is counted on entering `fixing`).
+      const round = context.attemptsUsed;
+      const id = `builder-${task.id}-r${round}`;
+      const key = `${baseBuilderKey(task.key)}/r${round}`;
+      const job = { ...builderJob(context, { ...task, key }), prompt: `${builderJob(context, task).prompt} Fix: ${decision.instructions}` };
+      enqueue.spawnChild('agent', { id, input: job });
+      enqueue.assign({
+        children: ({ context }) => [...context.children, { id, key, keepAlive: job.keepAlive, live: true }],
+        tasks: ({ context }) => context.tasks.map((candidate) => (candidate.id === task.id ? { ...candidate, builderId: id, key } : candidate)),
+      });
     }),
 
     // ── closing out ───────────────────────────────────────────────────────────────────
