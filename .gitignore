@@ -7,3 +7,4 @@ dist-test/
 # Run state may contain secrets. Never commit it.
 .herd/runs/
 .herd/daemon.sock
+.test-home/
