@@ -1,14 +1,24 @@
 /**
- * The four `bdc` commands (spec §7.2). Each one talks to the project's daemon over the socket and
+ * The `bdc` commands (spec §7.2). Each one talks to the project's daemon over the socket and
  * writes through the injected io, so `main` stays testable and nothing here calls `process.exit`.
+ * `start` and `daemon` are the slice-1 additions: one creates a run, the other is the daemon itself.
  */
-import { connect, newRequestId, type DaemonClient } from '../daemon/client.js';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
+import { ProjectConfig } from '../contracts/domain.js';
+import { connect, ensureDaemon, newRequestId, type DaemonClient } from '../daemon/client.js';
 import { latestRunId, projectPaths } from '../daemon/paths.js';
+import { ProjectRuns } from '../daemon/runs.js';
+import { startDaemon } from '../daemon/server.js';
+import { scriptedActors } from '../effects/scripted.js';
 
 export interface CliIO {
   out(text: string): void;
   err(text: string): void;
-  /** Aborting ends `bdc watch` so `main` can return. */
+  /** Aborting ends `bdc watch` and `bdc daemon` so `main` can return. */
   signal?: AbortSignal;
 }
 
@@ -16,13 +26,27 @@ export interface CliIO {
 export class UsageError extends Error {}
 
 export const USAGE = `usage:
+  bdc start <dir> "<goal>"
+  bdc daemon <dir> [--scripted]
   bdc send <dir> <EVENT_TYPE> [json-payload] [--run <id>]
   bdc status <dir> [--run <id>]
   bdc runs <dir>
   bdc watch <dir> [--run <id>]
 
-Sends person events to the project's daemon and prints run views (spec §7.2).
+Starts runs and the project daemon, sends person events and prints run views (spec §7.2).
 Without --run a command uses the project's latest run.`;
+
+/** What `bdc start` prints when the project has no `bdc.yaml` yet. */
+const EXAMPLE_CONFIG = `agents:
+  pm: { cli: pi, model: '' }
+  specWriter: { cli: pi, model: '' }
+  planner: { cli: pi, model: '' }
+  builder: { cli: pi, model: '' }
+  reviewer: { cli: pi, model: '' }
+  verifier: { cli: pi, model: '' }
+verification:
+  checks:
+    - run: npm test`;
 
 /** Send one person event. Silence on success: the caller sees the effect in `status`/`watch`. */
 export async function send(args: string[]): Promise<number> {
@@ -92,6 +116,121 @@ export async function watch(args: string[], io: CliIO): Promise<number> {
   } finally {
     client.close();
   }
+}
+
+/**
+ * `bdc start <dir> "<goal>"`: read the project's `bdc.yaml`, make sure the daemon is up, create the
+ * run and print its id.
+ *
+ * The run is created here, in the CLI process, and not over the socket: `server.ts` has no request
+ * that creates a run, and it is not this slice's file. The daemon adopts a run directory it did not
+ * create on the first request that names it (see `ProjectRuns.hostFor`), so the run continues in
+ * the daemon as soon as anything looks at it.
+ */
+export async function start(args: string[], io: CliIO): Promise<number> {
+  const { positional } = parseArgs(args, []);
+  if (positional.length !== 2) throw new UsageError('start takes a project directory and a goal');
+  const root = path.resolve(requireDir(positional[0], 'start'));
+  const goal = positional[1] ?? '';
+  if (goal.trim() === '') throw new UsageError('start needs a goal, in quotes');
+  const config = readProjectConfig(path.join(root, 'bdc.yaml'));
+
+  await ensureDaemon(root, () => spawnDaemon(root));
+  const runs = new ProjectRuns(root, { effects: (input) => scriptedActors({ goal: input.goal }) });
+  try {
+    io.out(`${runs.create(goal, config)}\n`);
+    return 0;
+  } finally {
+    runs.stop();
+  }
+}
+
+/** `bdc daemon <dir> --scripted`: the project's daemon, in the foreground, until Ctrl-C (§7.1). */
+export async function daemon(args: string[], io: CliIO): Promise<number> {
+  const positional: string[] = [];
+  let scripted = false;
+  for (const arg of args) {
+    if (arg === '--scripted') scripted = true;
+    else if (arg.startsWith('--')) throw new UsageError(`unknown option: ${arg}`);
+    else positional.push(arg);
+  }
+  if (positional.length > 1) throw new UsageError('daemon takes one project directory');
+  if (!scripted) throw new UsageError('real agents come in slice 2; run `bdc daemon <dir> --scripted`');
+  const root = path.resolve(positional[0] ?? '.');
+
+  const runs = new ProjectRuns(root, { effects: (input) => scriptedActors({ goal: input.goal }) });
+  const restored = runs.restoreAll();
+  const server = await startDaemon({ root: runs.root, hostFor: (runId) => runs.hostFor(runId), runs: () => runs.runs() });
+  const restoredNote = restored.length === 0 ? '' : `, restored ${restored.join(', ')}`;
+  io.out(`bdc daemon for ${runs.root} on ${server.socket}${restoredNote}\n`);
+  try {
+    await untilSignal(io.signal);
+    return 0;
+  } finally {
+    await server.stopDaemon();
+    runs.stop();
+  }
+}
+
+/** The project config, or a `UsageError` that says what to write instead. */
+function readProjectConfig(file: string): ProjectConfig {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    throw new UsageError(
+      `no bdc.yaml in ${path.dirname(file)}. \`bdc init\` comes in a later slice; write one by hand:\n\n${EXAMPLE_CONFIG}`,
+    );
+  }
+  let raw: unknown;
+  try {
+    raw = parseYaml(text);
+  } catch (error) {
+    throw new UsageError(`bdc.yaml is not valid YAML: ${message(error)}`);
+  }
+  const parsed = ProjectConfig.safeParse(raw);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((issue) => `${issue.path.join('.') || 'bdc.yaml'}: ${issue.message}`);
+    throw new UsageError(`bdc.yaml is not a project config: ${issues.join('; ')}`);
+  }
+  return parsed.data;
+}
+
+/** `dist/cli/bin.js`, next to this module, so a spawned daemon is the same build as the CLI. */
+function cliBin(): string {
+  return fileURLToPath(new URL('./bin.js', import.meta.url));
+}
+
+/** Start the daemon detached, its output in `.herd/daemon.log` (§7.1). A hidden hc terminal is slice 2. */
+function spawnDaemon(root: string): void {
+  const paths = projectPaths(root);
+  fs.mkdirSync(paths.herd, { recursive: true });
+  const log = fs.openSync(path.join(paths.herd, 'daemon.log'), 'a');
+  try {
+    const child = spawn(process.execPath, [cliBin(), 'daemon', paths.root, '--scripted'], {
+      detached: true,
+      stdio: ['ignore', log, log],
+    });
+    child.unref();
+  } finally {
+    fs.closeSync(log);
+  }
+}
+
+/** Resolve on Ctrl-C, SIGTERM or the caller's abort: the daemon runs until one of them. */
+function untilSignal(signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve) => {
+    const done = (): void => {
+      process.off('SIGINT', done);
+      process.off('SIGTERM', done);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    process.once('SIGINT', done);
+    process.once('SIGTERM', done);
+    if (signal?.aborted) done();
+    else signal?.addEventListener('abort', done, { once: true });
+  });
 }
 
 function untilStopped(client: DaemonClient, signal: AbortSignal | undefined): Promise<void> {
