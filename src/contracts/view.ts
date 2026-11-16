@@ -59,6 +59,8 @@ export const RunView = z.object({
   spec: z.object({ version: z.number().int(), markdown: z.string(), comments: z.array(SpecComment) }).nullable(),
   plan: Plan.nullable(),
   phases: z.array(PhaseView),
+  /** Findings of the whole-run review (§4.5), with their status. */
+  finalFindings: z.array(FindingView),
   pullRequest: z.object({ url: z.string().optional(), path: z.string().optional() }).nullable(),
 });
 export type RunView = z.infer<typeof RunView>;

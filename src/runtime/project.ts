@@ -211,6 +211,8 @@ export function projectRun(snapshot: RunSnapshot): RunView {
         : { version: context.specVersion, markdown: context.spec, comments: context.specComments },
     plan: context.plan,
     phases,
+    // Filled from the run's final review in the machine-fixes pass.
+    finalFindings: [],
     pullRequest: context.pr,
   };
 }
