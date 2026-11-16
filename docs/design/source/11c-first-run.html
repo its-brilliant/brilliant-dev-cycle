@@ -1,0 +1,286 @@
+<!doctype html><html><head><meta charset="utf-8"><style>:root{--bg:#17191d;--canvas:#131518;--chrome:#0f1114;--pop:#25272b;--raised:#2c2e31;--hover:rgba(255,255,255,.055);--sel:rgba(255,255,255,.09);--border:rgba(255,255,255,.094);--input:rgba(255,255,255,.14);--fg:#eeeeef;--tfg:#d2d4d9;--muted:#98999b;--dim:#696a6d;--accent:#96b2d7;--working:#e5c07b;--blocked:#f0705f;--done:#76a8ff;--pass:#a6bd91;--review:#8cbdc3;--mono:'Geist Mono','JetBrains Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#08090a;font-family:Geist,sans-serif;color:var(--fg);font-size:12.5px;-webkit-font-smoothing:antialiased}
+.artboard{width:1760px;height:1140px;padding:28px 40px 40px;background:#08090a;display:flex;flex-direction:column;gap:18px}
+.caption{display:flex;align-items:center;gap:14px;height:34px}
+.cnum{font-family:var(--mono);color:var(--dim);font-size:13px}.ctitle{font-size:20px;font-weight:500;letter-spacing:-.01em}
+.cmeta{color:var(--dim);font-size:12px}.cmeta b{color:var(--muted);font-weight:400;font-family:var(--mono);font-size:11.5px}
+.grow{flex:1 1 auto}
+.window{width:1680px;height:1020px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:var(--canvas);display:flex;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.5)}
+.ic{flex:none;display:block}.agi{display:inline-flex;flex:none}.agi svg{display:block}
+.mut{color:var(--muted)}.dim{color:var(--dim)}
+.mono{font-family:var(--mono)}
+/* sidebar */
+.sidebar{width:268px;flex:none;background:var(--chrome);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:0 8px 0}
+.brand{height:46px;display:flex;align-items:center;gap:8px;padding:0 6px}
+.tl{display:flex;gap:8px;margin-right:10px}.tl i{width:12px;height:12px;border-radius:50%;display:block}
+.logo{width:18px;height:18px;border-radius:4px}.bname{font-weight:500;font-size:13px}
+.sect{display:flex;align-items:center;height:26px;padding:0 6px;color:var(--muted);font-size:11.5px;margin-top:6px}
+.mach{display:flex;align-items:center;gap:6px;height:24px;padding:0 6px;color:var(--dim);font-size:11px}
+.space{display:flex;align-items:center;gap:8px;height:28px;padding:0 6px;border-radius:6px;font-size:12.5px}
+.space.sel{background:var(--sel)}
+.sq{width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:600;color:#0f1114}
+.sn{flex:1}.sm{color:var(--dim);font-size:11px;font-family:var(--mono)}
+.needs{font-size:10.5px;color:var(--working);border:1px solid rgba(229,192,123,.35);border-radius:4px;padding:0 5px;height:17px;display:flex;align-items:center}
+.sgap{height:10px;border-bottom:1px solid var(--border);margin:0 -8px 4px}
+.agrp{color:var(--dim);font-size:11px;padding:4px 6px 4px}
+.arow{display:flex;align-items:center;gap:8px;height:26px;padding:0 6px;border-radius:6px;font-size:12px;color:var(--tfg)}
+.arow.sel{background:var(--sel);color:var(--fg)}.an{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.am{color:var(--dim);font-size:10.5px;font-family:var(--mono)}
+.sfoot{height:40px;display:flex;align-items:center;gap:6px;padding:0 6px;border-top:1px solid var(--border);margin:0 -8px;padding:0 14px;font-size:11px}
+.layoutchip{display:flex;align-items:center;gap:6px;background:var(--hover);border:1px solid var(--border);border-radius:6px;height:24px;padding:0 8px;color:var(--tfg);font-family:var(--mono);font-size:11px}
+/* status dots / pills */
+.sdot{width:7px;height:7px;border-radius:50%;display:block;flex:none;background:currentColor}
+.s-dim{color:var(--dim)}.s-working{color:var(--working)}.s-review{color:var(--review)}.s-accent{color:var(--accent)}.s-pass{color:var(--pass)}.s-blocked{color:var(--blocked)}.s-done{color:var(--done)}
+.pill{display:inline-flex;align-items:center;gap:5px;height:19px;padding:0 7px;border-radius:5px;font-size:11px;background:rgba(255,255,255,.04);border:1px solid var(--border);white-space:nowrap;flex:none}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
+.pill.s-working{background:rgba(229,192,123,.08);border-color:rgba(229,192,123,.25)}.pill.s-blocked{background:rgba(240,112,95,.09);border-color:rgba(240,112,95,.3)}.pill.s-pass{background:rgba(166,189,145,.08);border-color:rgba(166,189,145,.25)}.pill.s-review{background:rgba(140,189,195,.08);border-color:rgba(140,189,195,.25)}.pill.s-accent{background:rgba(150,178,215,.08);border-color:rgba(150,178,215,.25)}
+/* work */
+.work{flex:1;display:flex;flex-direction:column;min-width:0}
+.tabs{height:42px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px;background:var(--chrome);border-bottom:1px solid var(--border)}
+.tab{display:flex;align-items:center;gap:7px;height:28px;padding:0 10px;border-radius:7px;color:var(--muted);font-size:12.8px}
+.tab.on{background:var(--sel);color:var(--fg)}.tk{font-family:var(--mono);font-size:10px;color:var(--dim);border:1px solid var(--border);border-radius:3px;padding:0 4px}
+.tabplus{color:var(--dim);padding:0 6px}.tbicon{color:var(--dim);width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px}.tbicon.on{color:var(--fg);background:var(--sel)}
+.bdcbar{height:44px;flex:none;display:flex;align-items:center;gap:18px;padding:0 14px 0 16px;border-bottom:1px solid var(--border);background:var(--canvas)}
+.runname{display:flex;align-items:baseline;gap:8px}.rn{font-weight:500;font-size:13.5px}.rp{font-family:var(--mono);font-size:11px;color:var(--dim)}
+.stages{display:flex;align-items:center;gap:8px;margin-left:10px}
+.stg{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim)}
+.stg i{width:17px;height:17px;border-radius:50%;border:1px solid var(--input);display:flex;align-items:center;justify-content:center;font-style:normal;font-size:10px;font-family:var(--mono)}
+.stg.done{color:var(--muted)}.stg.done i{background:rgba(166,189,145,.15);border-color:rgba(166,189,145,.4);color:var(--pass)}
+.stg.cur{color:var(--fg)}.stg.cur i{border-color:var(--accent);color:var(--accent);background:rgba(150,178,215,.12)}
+.stgl{width:22px;height:1px;background:var(--input)}
+.modes{display:flex;gap:2px;background:var(--chrome);border:1px solid var(--border);border-radius:8px;padding:2px}
+.mode{display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:6px;color:var(--muted);font-size:12px}.mode.on{background:var(--raised);color:var(--fg)}
+.body{flex:1;display:flex;gap:8px;padding:8px;min-height:0}
+.pane{background:var(--bg);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.mainpane{flex:1;min-width:0;border-color:rgba(150,178,215,.55)}
+.pmpane{width:360px;flex:none}
+.ph{height:30px;flex:none;display:flex;align-items:center;gap:7px;padding:0 6px 0 10px;border-bottom:1px solid var(--border);font-size:12px}
+.phi{color:var(--muted)}.pht{color:var(--fg)}.php{color:var(--dim);font-family:var(--mono);font-size:11px}
+.phb{color:var(--dim);width:22px;height:22px;display:flex;align-items:center;justify-content:center}
+.statusbar{height:26px;flex:none;display:flex;align-items:center;gap:16px;padding:0 12px;border-top:1px solid var(--border);background:var(--chrome);color:var(--muted);font-size:11px}
+.statusbar span{display:flex;align-items:center;gap:5px}
+/* pm */
+.pmbody{flex:1;display:flex;flex-direction:column;gap:12px;padding:12px;overflow:hidden}
+.msg{display:flex;gap:9px}.msg .av{width:22px;height:22px;flex:none;border-radius:6px;background:var(--raised);display:flex;align-items:center;justify-content:center}
+.msg .mb{flex:1;min-width:0}.mh{display:flex;align-items:baseline;gap:6px;font-size:11.5px;margin-bottom:3px}.mh b{font-weight:500;color:var(--fg)}.mh span{color:var(--dim);font-size:10.5px;font-family:var(--mono)}
+.mt{color:var(--tfg);line-height:1.5;font-size:12.5px}.mt code,.code{font-family:var(--mono);font-size:11.5px;color:var(--fg);background:rgba(255,255,255,.06);border-radius:3px;padding:0 3px}
+.msg.me .av{background:#3f8f86;color:#0f1114;font-weight:600;font-size:11px}
+.qcard{border:1px solid rgba(240,112,95,.35);background:rgba(240,112,95,.05);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.qcard.warn{border-color:rgba(229,192,123,.35);background:rgba(229,192,123,.05)}
+.qcard.info{border-color:var(--border);background:rgba(255,255,255,.025)}
+.qh{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted)}.qh b{color:var(--fg);font-weight:500}
+.qt{font-size:12.5px;line-height:1.5;color:var(--tfg)}
+.opts{display:flex;flex-direction:column;gap:5px}
+.opt{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12px;color:var(--tfg);background:var(--bg)}
+.opt .k{font-family:var(--mono);font-size:10.5px;color:var(--dim);width:14px}
+.opt.rec{border-color:rgba(150,178,215,.45)}.opt .tag{margin-left:auto;font-size:10.5px;color:var(--accent)}
+.qa{display:flex;gap:6px;align-items:center}
+.lnk{display:inline-flex;align-items:center;gap:5px;color:var(--accent);font-size:11.5px}
+.pminput{border-top:1px solid var(--border);padding:10px;display:flex;flex-direction:column;gap:8px}
+.pmbox{border:1px solid var(--input);border-radius:8px;height:54px;padding:9px 10px;background:var(--canvas)}.ph2{color:var(--dim)}
+.pmrow{display:flex;align-items:center;gap:8px}.chip{font-size:11px;border:1px solid var(--border);border-radius:5px;padding:1px 6px;color:var(--muted);font-family:var(--mono)}
+.kbd{font-family:var(--mono);font-size:10.5px;color:var(--dim);border:1px solid var(--border);border-radius:4px;padding:0 5px}
+.sendb{width:26px;height:26px;border-radius:7px;background:var(--fg);color:#121316;display:flex;align-items:center;justify-content:center}
+.sysline{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:11px;font-family:var(--mono)}.sysline:before,.sysline:after{content:"";flex:1;height:1px;background:var(--border)}
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:7px;border:1px solid var(--input);background:var(--raised);color:var(--fg);font-size:12px;white-space:nowrap;flex:none}
+.btn.pri{background:var(--fg);color:#121316;border-color:var(--fg);font-weight:500}
+.btn.ghost{background:transparent}.btn.sm{height:24px;padding:0 8px;font-size:11.5px;border-radius:6px}
+.btn.danger{color:var(--blocked);border-color:rgba(240,112,95,.35);background:rgba(240,112,95,.06)}
+/* toolbar inside main pane */
+.tb{height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--border)}
+.tbt{font-weight:500;font-size:13.5px}.tbs{color:var(--dim);font-size:12px}
+.seg{display:flex;border:1px solid var(--border);border-radius:7px;overflow:hidden}.seg span{height:26px;padding:0 9px;display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);border-right:1px solid var(--border)}.seg span:last-child{border-right:0}.seg span.on{background:var(--sel);color:var(--fg)}
+.lbl{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;font-weight:500}
+.card{border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.015)}
+.hr{height:1px;background:var(--border)}
+.ph,.space,.tab,.mode,.stg,.arow,.thq,.btn,.opt,.mh,.qh,.statusbar span,.sect,.mach,.rp,.rn{white-space:nowrap}
+.floatbar span{white-space:nowrap}
+.seg span{white-space:nowrap}
+html,body{background:#08090a;width:1760px;height:1140px;overflow:hidden}
+.mt code,.code,.ct code{white-space:nowrap}
+.mcode{color:var(--fg)}
+.envind{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);border:1px solid rgba(229,192,123,.3);background:rgba(229,192,123,.06);border-radius:7px;height:28px;padding:0 9px;white-space:nowrap}.envind b{color:var(--working);font-weight:500;font-family:var(--mono)}
+.s-queued{color:#c9a96e}.pill.s-queued{border-style:dashed;border-color:rgba(229,192,123,.4)}
+.envchip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--border);font-size:11.5px;white-space:nowrap;background:rgba(255,255,255,.03)}.envchip .u{font-family:var(--mono);font-size:11px;color:var(--accent)}
+
+.s-q{color:#ff6b5c}.pill.s-q{background:#ff6b5c;border-color:#ff6b5c;color:#1a0d0b;font-weight:600}.pill.s-q .dot{background:#1a0d0b}
+.answer{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:6px;background:#ff6b5c;color:#1a0d0b;font-size:11.5px;font-weight:600;white-space:nowrap;flex:none}
+
+.window{position:relative}
+.sect .addb{width:22px;height:22px;margin-right:-4px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.sect .addb.on{background:var(--sel);color:var(--fg);box-shadow:inset 0 0 0 1px var(--input)}
+.mach .mm{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.space .sm{margin-right:2px}
+.space .ac{font-family:var(--mono);font-size:10.5px;color:var(--dim);width:12px;text-align:right}
+.space.new .sn:after{content:"new";margin-left:7px;font-size:10px;font-family:var(--mono);color:var(--accent);border:1px solid rgba(150,178,215,.4);border-radius:3px;padding:0 4px;vertical-align:1px}
+.pmenu{position:absolute;z-index:8;width:248px;background:var(--pop);border:1px solid var(--input);border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.55);padding:5px;display:flex;flex-direction:column;gap:1px}
+.pmi{display:flex;align-items:center;gap:9px;height:30px;padding:0 8px;border-radius:6px;font-size:12.5px;color:var(--tfg);white-space:nowrap}
+.pmi .ic{color:var(--muted)}
+.pmi.hi{background:rgba(150,178,215,.14);color:var(--fg);height:44px;align-items:center}
+.pmi.hi .ic{color:var(--accent)}
+.pmi .d{display:flex;flex-direction:column;gap:2px}.pmi .d small{font-size:11px;color:var(--muted)}
+.pmi .kbd{margin-left:auto}
+.pmsep{height:1px;background:var(--border);margin:4px 2px}
+
+.work{position:relative}
+.ov{position:absolute;inset:0;background:rgba(8,9,10,.62);z-index:5;display:flex;align-items:flex-start;justify-content:center;padding-top:72px}
+ .md{width:800px;background:var(--bg);border:1px solid var(--input);border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.6);display:flex;flex-direction:column;max-height:880px}
+.mdh{display:flex;align-items:center;gap:10px;padding:16px 18px 14px}
+.mdh .t{font-size:15px;font-weight:500}.mdh .p{font-size:12px;color:var(--dim);line-height:1.45}
+.mdh .hic{width:28px;height:28px;border-radius:8px;background:rgba(150,178,215,.12);display:flex;align-items:center;justify-content:center;flex:none}
+.mdcols{display:flex;border-top:1px solid var(--border);min-height:0}
+.col-repo{width:348px;flex:none;border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+.col-wt{flex:1;min-width:0;display:flex;flex-direction:column}
+.colh{display:flex;align-items:center;gap:8px;padding:12px 14px 8px;font-size:12px;color:var(--muted)}
+.colh b{color:var(--fg);font-weight:500;font-size:12.5px}
+.search{margin:0 14px 8px;height:32px;border:1px solid var(--accent);border-radius:7px;background:var(--canvas);display:flex;align-items:center;gap:8px;padding:0 10px;box-shadow:0 0 0 3px rgba(150,178,215,.12)}
+.search .ic{color:var(--accent)}
+.search .ph{color:var(--dim);font-size:12.5px}
+.search .caret{display:inline-block;width:1.5px;height:14px;background:var(--fg);margin-left:1px;vertical-align:-2px}
+.rlist{flex:1;display:flex;flex-direction:column;padding:2px 8px 8px;gap:1px}
+.shd{display:flex;align-items:center;gap:6px;height:22px;padding:0 6px;margin-top:6px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500;white-space:nowrap}
+.shd .who{margin-left:8px;text-transform:none;letter-spacing:0;font-weight:400;font-family:var(--mono);font-size:10.5px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;flex:none}
+.shd .who .ic,.shd .who svg{display:block}
+.rrow{display:flex;align-items:flex-start;gap:8px;padding:7px 8px;border-radius:7px;cursor:default}
+.rrow .ico{color:var(--dim);margin-top:2px}
+.rrow .meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.rrow .rn2{font-size:12.5px;color:var(--tfg);display:flex;align-items:center;gap:6px;white-space:nowrap}
+.rrow .sub{font-family:var(--mono);font-size:10.5px;color:var(--dim);display:flex;align-items:center;gap:6px;white-space:nowrap}
+.rrow .sub .sep{color:rgba(255,255,255,.16)}
+.rrow.on{background:rgba(150,178,215,.14)}
+.rrow.on .rn2{color:var(--fg)}
+.rrow.on .ico{color:var(--accent)}
+.priv{display:inline-flex;align-items:center;gap:3px;height:16px;padding:0 5px;border:1px solid var(--border);border-radius:4px;font-size:10px;color:var(--muted);font-weight:400;letter-spacing:0}
+.cln{color:var(--pass)}.drt{color:#c9a96e}
+.choose{display:flex;align-items:center;gap:8px;height:32px;margin:4px 8px 0;padding:0 8px;border-radius:7px;color:var(--tfg);font-size:12.5px}
+.choose .ic{color:var(--muted)}
+.selbar{display:flex;align-items:center;gap:8px;margin:0 14px 12px;padding:0 10px;height:34px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.015);font-family:var(--mono);font-size:11.5px;color:var(--tfg);white-space:nowrap;min-width:0}
+.selbar .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.selbar .sep{color:var(--dim)}.selbar .ic{color:var(--muted);flex:none}
+.selbar .ok{margin-left:auto;display:flex;align-items:center;gap:5px;color:var(--pass);font-family:Geist,sans-serif;font-size:11.5px;flex:none}
+.fields{display:flex;flex-direction:column;gap:11px;padding:0 14px 4px}
+.flab{display:flex;align-items:baseline;gap:8px;font-size:12px;color:var(--muted)}
+.flab .hint{margin-left:auto;font-size:11px;color:var(--dim);font-weight:400}
+.fld2{height:32px;border:1px solid var(--input);border-radius:7px;background:var(--canvas);display:flex;align-items:center;gap:8px;padding:0 10px;font-size:12.5px;color:var(--fg);min-width:0}
+.fld2 .mono{font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fld2 .ic{color:var(--muted);flex:none}
+.fld2 .pre{color:var(--dim);font-family:var(--mono);font-size:12px;flex:none}
+.fld2 .chg{margin-left:auto;color:var(--accent);font-size:11.5px;font-family:Geist,sans-serif;flex:none}
+.branchrow{display:flex;align-items:center;gap:8px}
+.branchrow .fld2{flex:1}
+.from{font-size:12px;color:var(--dim);flex:none}
+.basesel{height:32px;padding:0 8px 0 10px;border:1px solid var(--input);border-radius:7px;background:var(--canvas);display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--fg);flex:none}
+.basesel .ic{color:var(--muted)}
+.mseg{display:flex;gap:6px}
+.mseg>span{flex:1;height:44px;border:1px solid var(--input);border-radius:8px;display:flex;align-items:center;gap:9px;padding:0 11px;background:var(--canvas);font-size:12.5px;color:var(--muted);white-space:nowrap}
+.mseg>span .ic{color:var(--dim)}
+.mseg>span small{display:block;font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:1px}
+.mseg>span.on{border-color:var(--accent);background:rgba(150,178,215,.08);color:var(--fg);box-shadow:0 0 0 3px rgba(150,178,215,.1)}
+.mseg>span.on .ic{color:var(--accent)}
+.rad{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--input);margin-left:auto;flex:none}
+.on .rad{border:4px solid var(--accent)}
+.note{display:flex;gap:9px;align-items:flex-start;margin:12px 14px 0;font-size:12px;line-height:1.5;color:var(--muted)}
+.note .ic{color:var(--dim);margin-top:2px;flex:none}
+.note .code{color:var(--fg)}
+.mdf{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--border);margin-top:14px;flex:none}
+/* sidebar: projects grouped by repo under each machine */
+.rhead{display:flex;align-items:center;gap:6px;height:22px;padding:0 6px 0 8px;margin-top:3px;color:var(--dim);font-family:var(--mono);font-size:10.5px;white-space:nowrap}
+.rhead .ic{color:var(--dim)}
+.proj{display:flex;align-items:center;gap:8px;min-height:36px;padding:4px 6px 4px 14px;border-radius:6px}
+.proj.sel{background:var(--sel)}
+.proj .pn{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.proj .pn .n{font-size:12.5px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.proj:not(.sel) .pn .n{color:var(--tfg)}
+.proj .br{font-family:var(--mono);font-size:10.5px;color:var(--dim);white-space:nowrap}
+.proj.new .n:after{content:"new";margin-left:6px;font-size:10px;font-family:var(--mono);color:var(--accent);border:1px solid rgba(150,178,215,.4);border-radius:3px;padding:0 4px;vertical-align:1px}
+.pill.s-dirty{border-style:dashed;border-color:rgba(229,192,123,.45);color:#c9a96e;background:transparent}
+
+.mainpane{border-color:var(--border)}
+.pmpane.focus{width:452px;border-color:rgba(150,178,215,.55)}
+.col{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.sbar{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)}
+.sg{display:flex;align-items:center;gap:8px;height:34px;padding:0 14px 0 8px;font-size:13px;color:var(--dim);white-space:nowrap}
+.sg i{width:20px;height:20px;border-radius:50%;border:1px dashed var(--input);display:flex;align-items:center;justify-content:center;font-style:normal;font-size:10.5px;font-family:var(--mono)}
+.sgl{flex:1;height:1px;background:var(--border);min-width:16px}
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background-color:var(--canvas);background-image:radial-gradient(rgba(255,255,255,.05) 1px,transparent 1px);background-size:16px 16px}
+.eic{width:40px;height:40px;border-radius:10px;border:1px dashed var(--input);display:flex;align-items:center;justify-content:center;color:var(--dim);background:var(--bg)}
+.et{font-size:15px;font-weight:500}
+.es{font-size:12.5px;color:var(--muted);text-align:center;line-height:1.5;max-width:420px}
+.flow{display:flex;align-items:center;gap:10px;margin-top:10px}
+.fs{display:flex;align-items:center;gap:8px;border:1px solid var(--border);background:var(--bg);border-radius:8px;height:34px;padding:0 11px;font-size:12px;color:var(--tfg);white-space:nowrap}
+.fs .n{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.fs.cur{border-color:rgba(150,178,215,.45);color:var(--fg)}.fs.cur .n{color:var(--accent)}
+.fa{color:var(--dim)}
+.setup{display:flex;align-items:center;gap:11px;height:40px;padding:0 14px;border-top:1px solid var(--border);font-size:11.5px;color:var(--muted);white-space:nowrap;flex:none}
+.setup span{display:flex;align-items:center;gap:6px}.setup .mono{font-size:11px;color:var(--tfg)}
+.termpane{height:250px;flex:none}
+.termb{padding:10px 12px;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11.5px;line-height:18px;color:var(--tfg);white-space:pre;overflow:hidden;background:#17191d;flex:1}
+.g{color:#a6bd91}.b{color:#96b2d7}.dm{color:#696a6d}.cur2{display:inline-block;width:7px;height:14px;background:var(--tfg);vertical-align:-2px;opacity:.85}
+.goal{border:1px solid rgba(150,178,215,.45);background:rgba(150,178,215,.04);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:11px;box-shadow:0 0 0 3px rgba(150,178,215,.07)}
+.gq{font-size:17px;font-weight:500;letter-spacing:-.01em}
+.gs{font-size:12.5px;color:var(--muted);line-height:1.5;margin-top:-4px}
+.ta{border:1px solid var(--accent);border-radius:8px;background:var(--canvas);height:118px;padding:10px 11px;font-size:12.5px;line-height:1.55;color:var(--dim);position:relative}
+.ta .caret{display:inline-block;width:1.5px;height:15px;background:var(--fg);vertical-align:-3px;margin-right:1px}
+.ex{display:flex;flex-direction:column;gap:5px}
+.exl{font-size:11px;color:var(--dim)}
+.exs{display:flex;flex-wrap:wrap;gap:6px}
+.exc{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--border);border-radius:13px;font-size:12px;color:var(--tfg);background:var(--bg);white-space:nowrap}
+.exc .ic{color:var(--dim)}
+.gf{display:flex;align-items:center;gap:8px}
+.dflt{border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.015)}
+.dr{display:flex;align-items:center;gap:8px;height:32px;padding:0 11px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);white-space:nowrap}.dr:first-child{border-top:0}.dr .v{margin-left:auto;display:flex;align-items:center;gap:6px;color:var(--tfg)}.dr .mono{font-size:11px}
+.dsh{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:4px}
+.gf .hint{font-size:11.5px;color:var(--dim)}
+</style><script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script></head><body>
+<div class="artboard" id="art">
+<div class="caption"><span class="cnum">11c</span><span class="ctitle">First run: worktree is ready, the PM asks for the goal</span><span class="grow"></span><span class="cmeta">mods <b>progress · pm-chat · bdc-bar</b></span><span class="cmeta">reads <b>worktree · bdc.yaml · .herd/ (empty)</b></span></div>
+<div class="window"><div class="sidebar">
+ <div class="brand"><div class="tl"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+  <img src="herdr.png" class="logo"/><span class="bname">Herdr</span><span class="grow"></span><span class="mut"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span><span class="mut"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></span></div>
+ <div class="sect"><span>Spaces</span><span class="grow"></span><span class="addb"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></div>
+ <div class="mach"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><span>This Mac</span><span class="grow"></span><span class="mm">local</span></div>
+ 
+    <div class="rhead"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10c0 4-6 3-10 6"/></svg>its-brilliant/brilliant-dev-cycle</div>
+    <div class="proj"><span class="sq" style="background:#3f8f86">b</span><span class="pn"><span class="n">brilliant-dev-cycle</span><span class="br">main</span></span><i class="sdot s-blocked"></i></div>
+    <div class="rhead"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10c0 4-6 3-10 6"/></svg>its-brilliant/brilliant-ai</div>
+    <div class="proj sel new"><span class="sq" style="background:#7d6aa8">s</span><span class="pn"><span class="n">sso-login</span><span class="br">bdc/sso-login</span></span><i class="sdot s-dim"></i></div>
+    <div class="proj"><span class="sq" style="background:#7d6aa8">h</span><span class="pn"><span class="n">health-check</span><span class="br">bdc/health-check</span></span><i class="sdot s-pass"></i></div>
+    <div class="proj"><span class="sq" style="background:#7d6aa8">p</span><span class="pn"><span class="n">perf-budget</span><span class="br">bdc/perf-budget</span></span><i class="sdot s-working"></i></div>
+    <div class="rhead"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10c0 4-6 3-10 6"/></svg>its-brilliant/website</div>
+    <div class="proj"><span class="sq" style="background:#c47a4e">w</span><span class="pn"><span class="n">website</span><span class="br">main</span></span><i class="sdot s-dim"></i></div>
+    
+ <div class="mach" style="margin-top:6px"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg><span>contabo</span><span class="grow"></span><span class="mm">ssh · connected</span><i class="sdot s-pass" style="margin-left:6px"></i></div>
+ 
+    <div class="rhead"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10c0 4-6 3-10 6"/></svg>its-brilliant/side-envs</div>
+    <div class="proj"><span class="sq" style="background:#5a7fc0">e</span><span class="pn"><span class="n">side-envs</span><span class="br">main</span></span><i class="sdot s-working"></i></div>
+    <div class="rhead"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10c0 4-6 3-10 6"/></svg>its-brilliant/api-gateway</div>
+    <div class="proj"><span class="sq" style="background:#5a7fc0">a</span><span class="pn"><span class="n">api-gateway</span><span class="br">feat/rl</span></span><i class="sdot s-pass"></i></div>
+    
+ <div class="sgap"></div>
+ <div class="sect"><span>Agents</span><span class="grow"></span><span class="dim"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></svg></span></div>
+ <div class="agrp">sso-login · no run yet</div>
+ <div class="arow sel"><span class="agi" style="width:13px;height:13px"><svg width="13" height="13"   viewBox="0 0 24 24"  xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"></path></svg></span><span class="an">pm</span><span class="am">waiting on you</span><i class="sdot s-dim"></i></div><div class="arow"><span class="mut" style="display:flex;width:13px"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 10 3 2-3 2M12 15h5"/></svg></span><span class="an">shell</span><span class="am">t1</span><i class="sdot s-dim"></i></div>
+ <div class="grow"></div>
+ <div class="sfoot"><span class="layoutchip"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></svg> bdc</span><span class="grow"></span><span class="dim">ctrl-shift-l</span></div>
+</div><div class="work"><div class="tabs"><span class="tab on"><i class="sdot s-dim"></i><span>dev cycle</span><span class="tk">bdc</span></span><span class="tab"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 10 3 2-3 2M12 15h5"/></svg><span>shell</span></span><span class="tabplus"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span><span class="grow"></span><span class="dim" style="font-size:11px">phase tabs appear once the spec is approved</span><span class="tbicon"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/></svg></span><span class="tbicon"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10c0 4-6 3-10 6"/></svg></span><span class="tbicon on"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg></span></div><div class="bdcbar"><div class="runname"><span class="rn">sso-login</span><span class="rp">~/bdc/worktrees/brilliant-ai/sso-login · no run yet</span></div><span class="grow"></span><span class="envind" style="border-color:var(--border);background:transparent"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>Side envs <b style="color:var(--muted)">0/3</b><span class="dim">max_envs</span></span><div class="modes"><span class="mode on"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15a8 8 0 1 1 16 0"/><path d="m12 15 4-5"/></svg>Progress</span><span class="mode" style="opacity:.45"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/></svg>Spec</span><span class="mode" style="opacity:.45"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10c0 4-6 3-10 6"/></svg>Phases</span><span class="mode" style="opacity:.45"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6L4 19a1 1 0 0 0 1 2h14a1 1 0 0 0 1-2l-6-10V3"/></svg>Verify</span><span class="mode" style="opacity:.45"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6z"/></svg>Reviewers</span><span class="mode" style="opacity:.45"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v10M18 17V9a3 3 0 0 0-3-3h-4"/><path d="m13 4-2 2 2 2"/></svg>Ship</span><span class="mode"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></span></div></div><div class="body"><div class="col"><div class="pane mainpane" style="flex:1"><div class="ph"><span class="phi"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15a8 8 0 1 1 16 0"/><path d="m12 15 4-5"/></svg></span><span class="pht">progress</span><span class="php">.herd/ · empty</span><span class="grow"></span><span class="phb"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></span><span class="phb"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></span><span class="phb"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg></span></div><div class="sbar"><span class="sg"><i>1</i>Spec</span><span class="sgl"></span><span class="sg"><i>2</i>Phases</span><span class="sgl"></span><span class="sg"><i>3</i>Build</span><span class="sgl"></span><span class="sg"><i>4</i>Final review</span><span class="sgl"></span><span class="sg"><i>5</i>PR</span></div><div class="empty"><span class="eic"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15a8 8 0 1 1 16 0"/><path d="m12 15 4-5"/></svg></span><div class="et">No run yet. Tell the PM what you're building.</div>
+<div class="es">The PM drafts a spec with you and splits it into phases. Nothing is built until you approve the spec.</div>
+<div class="flow"><span class="fs cur"><span class="n">1</span>Describe the goal</span><span class="fa"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span><span class="fs"><span class="n">2</span>Approve the spec</span><span class="fa"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span><span class="fs"><span class="n">3</span>Phases build and verify</span><span class="fa"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span><span class="fs"><span class="n">4</span>Review the PR</span></div></div><div class="setup"><span><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a6bd91" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg></span><span><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5z"/></svg><span class="mono">its-brilliant/brilliant-ai</span></span><span><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg><span class="mono">~/bdc/worktrees/brilliant-ai/sso-login</span></span><span><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9a6 6 0 0 1-6 6H8"/></svg><span class="mono">bdc/sso-login</span><span class="dim">from main</span></span><span><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>This Mac</span><span class="grow"></span><span class="lnk"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Agents and reviewers</span></div></div><div class="pane termpane"><div class="ph"><span class="phi"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 10 3 2-3 2M12 15h5"/></svg></span><span class="pht">shell</span><span class="php">t1 · ~/bdc/worktrees/brilliant-ai/sso-login</span><span class="grow"></span><span style="margin-right:6px"><span class="pill s-dim"><i class="dot"></i>idle</span></span><span class="phb"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></span><span class="phb"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></span><span class="phb"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg></span></div><div class="termb"><span class="dm">yoni@mac sso-login (bdc/sso-login) $</span> git worktree add -b bdc/sso-login ~/bdc/worktrees/brilliant-ai/sso-login main
+Preparing worktree (new branch <span class="b">'bdc/sso-login'</span>)
+HEAD is now at 4e2a91c
+<span class="dm">yoni@mac sso-login (bdc/sso-login) $</span> bdc init .
+<span class="g">✓</span> repo  its-brilliant/brilliant-ai · bdc/sso-login · clean
+<span class="g">✓</span> wrote <span class="b">bdc.yaml</span>
+<span class="g">✓</span> created <span class="b">.herd/</span>
+<span class="g">✓</span> space sso-login on This Mac · pm ready
+<span class="dm">yoni@mac sso-login (bdc/sso-login) $</span> <span class="cur2"></span></div></div></div><div class="pane pmpane focus"><div class="ph"><span class="phi"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg></span><span class="pht">pm-chat</span><span class="php">claude · opus 5.5</span><span class="grow"></span><span style="margin-right:6px"><span class="pill s-dim"><i class="dot"></i>waiting on you</span></span><span class="phb"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></span><span class="phb"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></span><span class="phb"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg></span></div><div class="pmbody" style="gap:14px;padding:14px"><div class="msg"><span class="av"><span class="agi" style="width:13px;height:13px"><svg width="13" height="13"   viewBox="0 0 24 24"  xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"></path></svg></span></span><div class="mb"><div class="mh"><b>PM</b><span>10:21</span></div><div class="mt">I've read <span class="mcode code">its-brilliant/brilliant-ai</span> on <span class="mcode code">bdc/sso-login</span>, from <span class="mcode code">main</span>. Tell me the outcome you want. I'll ask what I need, then draft a spec for you to approve.</div></div></div>
+<div class="goal"><div class="gq">What are we building?</div><div class="gs">One or two sentences about the result is enough. Link an issue or doc if you have one.</div>
+<div class="ta"><span class="caret"></span>e.g. Admins sign in with Google Workspace SSO, and anyone outside its-brilliant is turned away…</div>
+<div class="ex"><span class="exl">Or start from an example</span><div class="exs"><span class="exc"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/></svg>Add SSO to the admin console</span><span class="exc"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/></svg>Cut cold start under 1s</span><span class="exc"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/></svg>Fix the flaky checkout tests</span></div></div>
+<div class="gf"><span class="dim"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-4 7.5"/></svg></span><span class="chip">#issue</span><span class="chip">/spec file</span><span class="grow"></span><span class="hint">⌘⏎</span><span class="btn pri" style="height:30px;padding:0 14px"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5v14l11-7z"/></svg>Start</span></div></div>
+<div class="dsh"><span>Defaults from <span class="mono" style="color:var(--tfg)">bdc.yaml</span></span><span class="grow"></span><span class="lnk">Change</span></div>
+<div class="dflt"><div class="dr"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>PM<span class="v"><span class="agi" style="width:13px;height:13px"><svg width="13" height="13"   viewBox="0 0 24 24"  xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"></path></svg></span><span class="mono">claude · opus 5.5</span></span></div>
+<div class="dr"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m4 20 12-12M15 4v3M18 7h3M13 2h0"/></svg>Builders<span class="v"><span class="agi" style="width:13px;height:13px"><svg width="13" height="13"   viewBox="0 0 24 24"  xmlns="http://www.w3.org/2000/svg"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"></path><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#lobe-icons-codex-_R_0_)"></path><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-codex-_R_0_" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></svg></span><span class="agi" style="width:13px;height:13px"><svg width="13" height="13"   viewBox="0 0 24 24"  xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"></path></svg></span><span class="mono">codex, claude</span></span></div>
+<div class="dr"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6z"/></svg>Reviewers<span class="v"><span class="mono">perf · security · ux</span></span></div>
+<div class="dr"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>Side envs<span class="v"><span class="mono">max 3 · torn down after verify</span></span></div></div></div></div></div><div class="statusbar"><span><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9a6 6 0 0 1-6 6H8"/></svg> bdc/sso-login</span><span><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg> watchFolder .herd/</span><span><i class="sdot s-dim"></i> pm waiting on you</span><span class="grow"></span><span>Geist · graphite</span><span>layout: bdc</span></div></div></div>
+</div></body></html>

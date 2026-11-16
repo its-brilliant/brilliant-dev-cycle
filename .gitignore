@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-test/
+*.tsbuildinfo
+.worktrees/
+
+# Run state may contain secrets. Never commit it.
+.herd/runs/
+.herd/daemon.sock
