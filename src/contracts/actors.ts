@@ -8,6 +8,18 @@ import type { AgentChoice, Finding, ProofRequirement, Role, VerificationSetup } 
 /** Which submit tool ends the job (§3.4). The MCP server validates the submission for it. */
 export type SubmitKind = 'brief' | 'reply' | 'decision' | 'spec' | 'plan' | 'task' | 'findings' | 'proof';
 
+/** The MCP tool that ends a job of each kind (§3.4). `bdc mcp` and the agent machine's nudge both use it. */
+export const SUBMIT_TOOLS: Record<SubmitKind, string> = {
+  brief: 'submit_brief',
+  reply: 'reply',
+  decision: 'decide',
+  spec: 'submit_spec',
+  plan: 'submit_plan',
+  task: 'report_task',
+  findings: 'submit_findings',
+  proof: 'submit_proof',
+};
+
 /** One agent job (§5.5). `key` is stable for the job, so a restored machine re-attaches instead of relaunching. */
 export interface AgentJob {
   key: string;

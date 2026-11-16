@@ -14,6 +14,7 @@
  */
 import { assign, fromCallback, fromPromise, sendParent, setup } from 'xstate';
 import type { DoneActorEvent, ErrorActorEvent } from 'xstate';
+import { SUBMIT_TOOLS } from '../contracts/actors.js';
 import type {
   AgentJob,
   CloseAgentInput,
@@ -29,20 +30,8 @@ import type { Question } from '../contracts/domain.js';
 /** §3.3: an agent that settled without a result gets 20 s, then one nudge, then 20 s more. */
 const EMPTY_GRACE_MS = 20_000;
 
-/** The submit tool of each job kind (§3.4); the nudge has to name the tool the agent must call. */
-const SUBMIT_TOOL: Record<SubmitKind, string> = {
-  brief: 'submit_brief',
-  reply: 'reply',
-  decision: 'decide',
-  spec: 'submit_spec',
-  plan: 'submit_plan',
-  task: 'report_task',
-  findings: 'submit_findings',
-  proof: 'submit_proof',
-};
-
 function nudgeText(job: AgentJob): string {
-  return `You have not finished: bdc has no result from you. Call the ${SUBMIT_TOOL[job.submit]} tool now with your result.`;
+  return `You have not finished: bdc has no result from you. Call the ${SUBMIT_TOOLS[job.submit]} tool now with your result.`;
 }
 
 /** Everything the machine knows about the job. Plain JSON: it is persisted (§5.7). */
@@ -184,7 +173,7 @@ export const agentMachine = setup({
       key: context.job.key,
       outcome: {
         status: 'empty',
-        detail: `the agent settled without calling ${SUBMIT_TOOL[context.job.submit]}`,
+        detail: `the agent settled without calling ${SUBMIT_TOOLS[context.job.submit]}`,
       },
     })),
     reportCrashed: sendParent(({ context }): AgentToParent => ({
