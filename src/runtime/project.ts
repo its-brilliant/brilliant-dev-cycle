@@ -7,12 +7,6 @@
  * - it reads the run context and its phase children's snapshots and nothing else: no files, no clock.
  * - it does not validate at runtime (a projection bug must not kill the daemon); the tests parse the
  *   result with `RunView` instead.
- *
- * What the machines do not keep yet, so the view cannot show it (see the slice-1 report):
- * - a phase's verification steps (the phase keeps only the proof files);
- * - the questions of an `ask_user` that is waiting (the run keeps only the ask id);
- * - a trust prompt (the run deliberately ignores `AGENT_NEEDS_YOU`), so `agentPrompts` is empty;
- * - the final review's findings (they have no home in `RunView`).
  */
 import type { AnyStateMachine, SnapshotFrom, StateValue } from 'xstate';
 import type { PlanPhase } from '../contracts/domain.js';
@@ -134,6 +128,29 @@ function findingViews(context: PhaseContext, leaf: string): FindingView[] {
   return views;
 }
 
+/** §8: a run-level finding's status says what the run did about it (§4.5: continue or stop). */
+function finalFindingViews(context: RunSnapshot['context']): FindingView[] {
+  const views: FindingView[] = [];
+  for (const [lens, findings] of Object.entries(context.reviewFindings)) {
+    const blockOn = context.config.lenses[lens]?.block_on ?? 'high';
+    // The PM's decision on the whole run is recorded against the run, not against a phase (§4.5).
+    const override = context.overrides.find(
+      (candidate) => candidate.phaseId === 'run' && (candidate.lens === undefined || candidate.lens === lens),
+    );
+    for (const finding of findings) {
+      const status: FindingView['status'] = override
+        ? override.who === 'person'
+          ? 'overridden'
+          : 'continued'
+        : blocks(finding.severity, blockOn)
+          ? 'open'
+          : 'advisory';
+      views.push({ ...finding, lens, status, note: override?.reason ?? '' });
+    }
+  }
+  return views;
+}
+
 /** A phase that has no child actor: the run knows how it ended, not what it did. */
 function settledPhaseView(phase: PlanPhase, status: string): PhaseView {
   const state = status === 'done' ? 'done' : status === 'stopped' ? 'stopped' : 'waiting';
@@ -167,9 +184,19 @@ function phaseView(phase: PlanPhase, snapshot: RunSnapshot): PhaseView {
     needsYou: leaf === 'awaitingYou',
     attemptsUsed: context.attemptsUsed,
     findings: findingViews(context, leaf),
-    // The phase machine keeps the proof files, not the verification steps, so there is nothing
-    // truthful to put here yet.
-    verification: null,
+    verification:
+      context.verificationResult === null
+        ? null
+        : {
+            passed: context.verificationResult.passed,
+            steps: context.verificationResult.steps.map((step) => ({
+              name: step.name,
+              command: step.command,
+              exitCode: step.exitCode,
+              durationMs: step.durationMs,
+              outputTail: step.outputTail,
+            })),
+          },
     proof: context.proofItems,
   };
 }
@@ -191,17 +218,19 @@ export function projectRun(snapshot: RunSnapshot): RunView {
     stage,
     stageWords: paused ? `Paused — ${words}` : words,
     paused,
+    // Anything that waits on the person: a review to approve, a question, an agent's prompt (§7.2).
     needsYou:
       stage === 'specReview' ||
       stage === 'planReview' ||
       (stage === 'shipping' && leaf === 'ready') ||
-      context.asking !== null,
+      context.asking !== null ||
+      context.agentPrompts.length > 0,
     error: context.error === null ? null : context.error.detail,
     asking:
       context.asking === null
         ? null
-        : { askId: context.asking.askId, scope: context.asking.scope, questions: [] },
-    agentPrompts: [],
+        : { askId: context.asking.askId, scope: context.asking.scope, questions: context.asking.questions },
+    agentPrompts: context.agentPrompts,
     chat: context.chat.map((entry) => ({ from: entry.from === 'person' ? ('you' as const) : ('pm' as const), text: entry.text })),
     proposals,
     brief: context.brief,
@@ -211,8 +240,7 @@ export function projectRun(snapshot: RunSnapshot): RunView {
         : { version: context.specVersion, markdown: context.spec, comments: context.specComments },
     plan: context.plan,
     phases,
-    // Filled from the run's final review in the machine-fixes pass.
-    finalFindings: [],
+    finalFindings: finalFindingViews(context),
     pullRequest: context.pr,
   };
 }

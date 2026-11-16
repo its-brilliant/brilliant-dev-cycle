@@ -1,5 +1,6 @@
-import { createActor } from 'xstate';
+import { createActor, fromPromise } from 'xstate';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { CheckProofInput, CheckProofOutput, RunVerificationInput, RunVerificationOutput } from '../../src/contracts/actors.js';
 import { ProjectConfig } from '../../src/contracts/domain.js';
 import { RunView, type RunView as RunViewType } from '../../src/contracts/view.js';
 import { scriptedActors } from '../../src/effects/scripted.js';
@@ -20,6 +21,8 @@ type Actor = ReturnType<typeof createActor<ReturnType<typeof wiredRunMachine>>>;
 
 /** The next snapshot the run reaches where `predicate` holds; the current one counts too. */
 function nextWhere(actor: Actor, predicate: (snapshot: RunSnapshot) => boolean, what: string): Promise<RunSnapshot> {
+  const current = actor.getSnapshot() as RunSnapshot;
+  if (predicate(current)) return Promise.resolve(current);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       subscription.unsubscribe();
@@ -50,6 +53,8 @@ function expectPeopleWords(view: RunViewType): void {
     expect(text.trim()).not.toBe('');
   }
 }
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 let actor: Actor | undefined;
 
@@ -163,5 +168,156 @@ describe('projectRun', () => {
     }
     expect(p1?.state).toBe('building');
     expect(p1?.words).toBe('building 1 task');
+  });
+
+  it('shows the questions of the ask that is waiting and counts them as waiting on the person', { timeout: 10_000 }, async () => {
+    actor = createActor(wiredRunMachine(scriptedActors({ goal: INPUT.goal })), { input: INPUT });
+    actor.start();
+
+    const questions = [
+      { id: 'q1', title: 'Which provider?', body: '', kind: 'single' as const, options: [], allowOther: true },
+    ];
+    actor.send({ type: 'PM_ASKING', scope: null, askId: 'ask-1', questions });
+    const view = projectRun(actor.getSnapshot() as RunSnapshot);
+    expect(RunView.safeParse(view).success).toBe(true);
+    expect(view.asking).toEqual({ askId: 'ask-1', scope: null, questions });
+    expect(view.needsYou).toBe(true);
+
+    actor.send({ type: 'PM_ASK_DONE', askId: 'ask-1' });
+    expect(projectRun(actor.getSnapshot() as RunSnapshot).asking).toBeNull();
+  });
+
+  it('shows an agent prompt as a card and stops waiting on the person when it is answered', { timeout: 10_000 }, async () => {
+    actor = createActor(wiredRunMachine(scriptedActors({ goal: INPUT.goal })), { input: INPUT });
+    actor.start();
+
+    await nextWhere(actor, stageIs('specReview'), 'spec review');
+    actor.send({ type: 'SPEC_APPROVED' });
+    await nextWhere(actor, stageIs('planReview'), 'plan review');
+    actor.send({ type: 'PLAN_APPROVED' });
+    const building = await nextWhere(actor, stageIs('building'), 'building');
+    expect(projectRun(building).needsYou).toBe(false);
+
+    // The phase child forwards its builder's prompt (§3.3).
+    const trust = { prompt: 'Trust this folder?', choices: ['Trust', "Don't"] };
+    const key = `${INPUT.runId}/p1/t1/builder`;
+    actor.send({ type: 'AGENT_NEEDS_YOU', key, ...trust });
+    const asked = projectRun(actor.getSnapshot() as RunSnapshot);
+    expect(RunView.safeParse(asked).success).toBe(true);
+    expect(asked.agentPrompts).toEqual([{ agentKey: key, ...trust }]);
+    expect(asked.needsYou).toBe(true);
+
+    actor.send({ type: 'PROMPT_CHOICE', agentKey: key, choice: 'Trust' });
+    const answered = projectRun(actor.getSnapshot() as RunSnapshot);
+    expect(answered.agentPrompts).toEqual([]);
+    expect(answered.needsYou).toBe(false);
+  });
+
+  it("keeps a phase's verification steps and projects them", { timeout: 10_000 }, async () => {
+    const effects = scriptedActors({ goal: INPUT.goal });
+    const step = { phase: 'check' as const, name: 'unit', command: 'npm test', exitCode: 0, durationMs: 3, outputTail: 'ok' };
+    actor = createActor(
+      wiredRunMachine({
+        ...effects,
+        runVerification: fromPromise<RunVerificationOutput, RunVerificationInput>(async () => ({
+          passed: true,
+          steps: [step],
+          proofFiles: ['verify.log'],
+        })),
+        // Held, so the phase stays in `proving` with its verification on record long enough to read.
+        checkProof: fromPromise<CheckProofOutput, CheckProofInput>(() => new Promise(() => undefined)),
+      }),
+      { input: INPUT },
+    );
+    actor.start();
+
+    await nextWhere(actor, stageIs('specReview'), 'spec review');
+    actor.send({ type: 'SPEC_APPROVED' });
+    await nextWhere(actor, stageIs('planReview'), 'plan review');
+    actor.send({ type: 'PLAN_APPROVED' });
+    await nextWhere(actor, stageIs('building'), 'building');
+
+    // A phase child's snapshot does not move the run's own subscription, so read it until it does.
+    const deadline = Date.now() + 8_000;
+    let verification = projectRun(actor.getSnapshot() as RunSnapshot).phases.find((phase) => phase.id === 'p1')?.verification;
+    while (verification === null && Date.now() < deadline) {
+      await sleep(5);
+      verification = projectRun(actor.getSnapshot() as RunSnapshot).phases.find((phase) => phase.id === 'p1')?.verification;
+    }
+    expect(verification).toEqual({
+      passed: true,
+      steps: [{ name: 'unit', command: 'npm test', exitCode: 0, durationMs: 3, outputTail: 'ok' }],
+    });
+  });
+
+  it('projects the whole-run findings: open, then continued with the PM reason', { timeout: 10_000 }, async () => {
+    // A lens prompt with BLOCK makes the scripted reviewer report a high finding (§8).
+    const input: RunInput = { ...INPUT, lensPrompts: { security: 'BLOCK: report a high finding' } };
+    actor = createActor(wiredRunMachine(scriptedActors({ goal: INPUT.goal })), { input });
+    actor.start();
+
+    await nextWhere(actor, stageIs('specReview'), 'spec review');
+    actor.send({ type: 'SPEC_APPROVED' });
+    await nextWhere(actor, stageIs('planReview'), 'plan review');
+    actor.send({ type: 'PLAN_APPROVED' });
+
+    // A blocking finding of the whole-run review is open until the PM decides about it (§4.5).
+    const open = await nextWhere(
+      actor,
+      (snapshot) => projectRun(snapshot).finalFindings.some((finding) => finding.status === 'open'),
+      'an open run finding',
+    );
+    expect(projectRun(open).finalFindings).toEqual([
+      {
+        id: 'scripted-1',
+        severity: 'high',
+        summary: 'The scripted reviewer blocked this change',
+        fix: 'Change the code',
+        lens: 'security',
+        status: 'open',
+        note: '',
+      },
+    ]);
+
+    // The scripted PM continues, and the reason is kept with the finding.
+    const continued = await nextWhere(
+      actor,
+      (snapshot) => projectRun(snapshot).finalFindings.some((finding) => finding.status === 'continued'),
+      'a continued run finding',
+    );
+    expect(projectRun(continued).finalFindings[0]).toMatchObject({ lens: 'security', status: 'continued', note: 'scripted' });
+
+    await nextWhere(actor, stageIs('shipping'), 'shipping');
+    actor.send({ type: 'OPEN_PR', draft: true });
+    const done = await nextWhere(actor, stageIs('done'), 'done');
+    const view = projectRun(done);
+    expect(RunView.safeParse(view).success).toBe(true);
+    expect(view.finalFindings.map((finding) => [finding.lens, finding.status, finding.note])).toEqual([
+      ['security', 'continued', 'scripted'],
+    ]);
+  });
+
+  it('projects a whole-run finding below the lens block level as advisory', { timeout: 10_000 }, async () => {
+    const config = ProjectConfig.parse({
+      ...CONFIG,
+      // A high finding is below `critical`, so this lens does not block the run (§8).
+      lenses: { security: { block_on: 'critical' } },
+    });
+    const input: RunInput = { ...INPUT, config, lensPrompts: { security: 'BLOCK: report a high finding' } };
+    actor = createActor(wiredRunMachine(scriptedActors({ goal: INPUT.goal })), { input });
+    actor.start();
+
+    await nextWhere(actor, stageIs('specReview'), 'spec review');
+    actor.send({ type: 'SPEC_APPROVED' });
+    await nextWhere(actor, stageIs('planReview'), 'plan review');
+    actor.send({ type: 'PLAN_APPROVED' });
+    const advisory = await nextWhere(
+      actor,
+      (snapshot) => projectRun(snapshot).finalFindings.length > 0,
+      'the whole-run finding',
+    );
+    expect(projectRun(advisory).finalFindings.map((finding) => [finding.lens, finding.status])).toEqual([
+      ['security', 'advisory'],
+    ]);
   });
 });

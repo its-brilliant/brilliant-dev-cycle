@@ -114,7 +114,7 @@ type ScriptedSubmission =
  * sent (`decide`, `submit_brief`, `reply`); every other role has one submit kind for the job.
  */
 function submissionFor(job: AgentJob, terminal: string, options: ScriptedOptions): ScriptedSubmission {
-  const kind: SubmitKind = job.role === 'pm' ? pmSubmitKind(job, terminal) : job.submit;
+  const kind: SubmitKind | null = job.role === 'pm' ? pmSubmitKind(terminal) : job.submit;
   switch (kind) {
     case 'brief':
       return { brief: job.prompt, decisions: [], assumptions: [] };
@@ -137,16 +137,24 @@ function submissionFor(job: AgentJob, terminal: string, options: ScriptedOptions
       return { text: 'ok' };
     case 'proof':
       return { items: [] as ProofItem[] };
+    case null:
+      // The PM was never asked anything, so it has no artifact to submit. An empty text fits no
+      // request, so the turn fails loudly instead of inventing a brief from the job prompt.
+      return { text: '' };
   }
 }
 
-/** The PM's submit tool follows the request: `decidePrompt`, `intakePrompt` or `messagePrompt`. */
-function pmSubmitKind(job: AgentJob, terminal: string): SubmitKind {
-  const prompt = sentText.get(terminal) ?? job.prompt;
+/**
+ * The PM's submit tool follows the turn it was sent: `decide`, `submit_brief` or `reply`. The
+ * scripted PM answers the `FOLLOW_UP` it received; the job prompt only primes the session (§5.4).
+ */
+function pmSubmitKind(terminal: string): SubmitKind | null {
+  const prompt = sentText.get(terminal);
+  if (prompt === undefined) return null;
   if (prompt.includes('Call `decide`')) return 'decision';
   if (prompt.includes('`submit_brief`')) return 'brief';
   if (prompt.includes('`reply`')) return 'reply';
-  return 'brief';
+  return null;
 }
 
 /**

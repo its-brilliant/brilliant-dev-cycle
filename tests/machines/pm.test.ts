@@ -2,7 +2,7 @@ import { createActor, enqueueActions, setup, type AnyActorRef } from 'xstate';
 import { describe, expect, it } from 'vitest';
 import type { AgentJob } from '../../src/contracts/actors.js';
 import type { Question } from '../../src/contracts/domain.js';
-import type { AgentOutcome, AgentToParent, ParentToAgent, PmToRun, RunToPm } from '../../src/contracts/events.js';
+import type { AgentOutcome, AgentToParent, ParentToAgent, PersonEvent, PmToRun, RunToPm } from '../../src/contracts/events.js';
 import {
   answeredNote,
   decidePrompt,
@@ -28,6 +28,10 @@ type Step =
 interface Script {
   jobs: AgentJob[];
   prompts: string[];
+  /** The job keys whose agent was told to close its terminal. */
+  closed: string[];
+  /** The keys the agent was sent for a prompt choice. */
+  choices: string[];
   steps: Step[];
 }
 
@@ -45,6 +49,12 @@ function agentStub(script: Script) {
       recordPrompt: ({ event }) => {
         if (event.type === 'FOLLOW_UP') script.prompts.push(event.prompt);
       },
+      recordClose: ({ context }) => {
+        script.closed.push(context.key);
+      },
+      recordChoice: ({ context, event }) => {
+        if (event.type === 'PROMPT_CHOICE') script.choices.push(`${context.key}:${event.choice}`);
+      },
       step: enqueueActions(({ context, enqueue }) => {
         const next = script.steps.shift();
         if (next === undefined) return;
@@ -61,7 +71,16 @@ function agentStub(script: Script) {
     context: ({ input }) => input,
     entry: 'recordJob',
     initial: 'running',
-    states: { running: { on: { FOLLOW_UP: { actions: 'recordPrompt' }, TEST_STEP: { actions: 'step' } } } },
+    states: {
+      running: {
+        on: {
+          FOLLOW_UP: { actions: 'recordPrompt' },
+          CLOSE: { actions: 'recordClose' },
+          PROMPT_CHOICE: { actions: 'recordChoice' },
+          TEST_STEP: { actions: 'step' },
+        },
+      },
+    },
   });
 }
 
@@ -83,7 +102,7 @@ function nth<T>(items: readonly T[], index: number): T {
  * it needs one.
  */
 function harness(steps: Step[] = []) {
-  const script: Script = { jobs: [], prompts: [], steps: [...steps] };
+  const script: Script = { jobs: [], prompts: [], closed: [], choices: [], steps: [...steps] };
   const received: PmToRun[] = [];
   const parent = setup({
     types: { context: {} as { goal: string }, events: {} as PmToRun, input: {} as PmInput },
@@ -108,7 +127,7 @@ function harness(steps: Step[] = []) {
     received,
     pm,
     agent: () => childOf(pm()),
-    send: (event: RunToPm | AgentToParent) => pm().send(event),
+    send: (event: RunToPm | AgentToParent | Extract<PersonEvent, { type: 'PROMPT_CHOICE' }>) => pm().send(event),
     step: () => childOf(pm()).send({ type: 'TEST_STEP' }),
     state: () => pm().getSnapshot().value,
     /** Persist → JSON → restore, the way the daemon does it (§5.7). */
@@ -322,22 +341,44 @@ describe('pmMachine', () => {
   it('survives a persist → restore while thinking without launching a second session', () => {
     const test = harness([{ kind: 'result', outcome: { status: 'done', submission: brief } }]);
     expect(test.state()).toBe('thinking');
+    expect(test.script.prompts).toHaveLength(1);
     test.restore();
     expect(test.state()).toBe('thinking');
     expect(test.script.jobs).toHaveLength(1);
+    // The request is put into the session again: the turn is an invoked actor, so a restore
+    // re-establishes it (an entry action would not run again, §5.7).
+    expect(test.script.prompts).toHaveLength(2);
+    expect(nth(test.script.prompts, 1)).toBe(nth(test.script.prompts, 0));
     test.step();
     expect(test.received).toEqual([{ type: 'PM_BRIEF', brief }]);
     expect(test.state()).toBe('idle');
     expect(test.script.jobs).toHaveLength(1);
   });
 
-  it('ignores CLOSE and a PM trust prompt, which the contracts do not carry to the run', () => {
+  it('closes its agent when the run closes it', () => {
     const test = harness([{ kind: 'result', outcome: { status: 'done', submission: brief } }]);
     test.step();
-    const before = JSON.stringify(test.pm().getSnapshot().context);
+
+    // The run ended: the PM session's terminal closes with it (§5.5).
     test.send({ type: 'CLOSE' });
-    test.send({ type: 'AGENT_NEEDS_YOU', key: 'r1/pm', prompt: 'Trust this folder?', choices: ['Trust', "Don't"] });
+    expect(test.script.closed).toEqual(['r1/pm']);
     expect(test.state()).toBe('idle');
-    expect(JSON.stringify(test.pm().getSnapshot().context)).toBe(before);
+  });
+
+  it("surfaces its own session's trust prompt and sends the person's choice to the agent", () => {
+    const test = harness([{ kind: 'result', outcome: { status: 'done', submission: brief } }]);
+    test.step();
+    const trust = { prompt: 'Trust this folder?', choices: ['Trust', "Don't"] };
+
+    // The prompt is the person's to answer, so the run shows it as a card (§3.3).
+    test.send({ type: 'AGENT_NEEDS_YOU', key: 'r1/pm', ...trust });
+    expect(test.received).toContainEqual({ type: 'AGENT_NEEDS_YOU', key: 'r1/pm', ...trust });
+
+    // A choice for another agent is not this session's business.
+    test.send({ type: 'PROMPT_CHOICE', agentKey: 'r1/p1/builder', choice: 'Trust' });
+    expect(test.script.choices).toEqual([]);
+
+    test.send({ type: 'PROMPT_CHOICE', agentKey: 'r1/pm', choice: 'Trust' });
+    expect(test.script.choices).toEqual(['r1/pm:Trust']);
   });
 });

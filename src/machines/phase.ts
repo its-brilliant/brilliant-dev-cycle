@@ -44,6 +44,7 @@ import type {
   ProofItem,
   RunVerificationInput,
   RunVerificationOutput,
+  StepResult,
 } from '../contracts/actors.js';
 import type { AgentOutcome, AgentToParent, RunToPhase } from '../contracts/events.js';
 
@@ -83,10 +84,17 @@ export interface PhaseReviewer {
   done: boolean;
 }
 
-/** A spawned agent child: its actor id and its job key (which is how the run names it). */
+/**
+ * A spawned agent child: its actor id and its job key (which is how the run names it). `live` is
+ * whether its agent may still have a terminal: a session that does not keep alive closes itself
+ * after its result, and so does a keep-alive session whose turn failed (§5.5), so CLOSE goes only
+ * to the children still up.
+ */
 export interface PhaseChild {
   id: string;
   key: string;
+  keepAlive: boolean;
+  live: boolean;
 }
 
 export interface PhaseContext extends PhaseInput {
@@ -105,6 +113,8 @@ export interface PhaseContext extends PhaseInput {
   findings: Record<string, Finding[]>;
   overrides: Array<{ who: 'person' | 'pm'; lens?: string; reason: string }>;
   slot: number | null;
+  /** What `runVerification` reported, so the view can show the steps that ran (§7.2, §7.4). */
+  verificationResult: { passed: boolean; steps: StepResult[] } | null;
   proofFiles: string[];
   proofItems: ProofItem[];
   verifierDone: boolean;
@@ -122,7 +132,26 @@ export interface PhaseContext extends PhaseInput {
   stopReason: string | null;
 }
 
-type PhaseEvent = RunToPhase | AgentToParent;
+/**
+ * What a state that waits on another actor tells itself on entry: "send your request again". An
+ * internal event, not one the run or an agent sends.
+ */
+type Resend =
+  | { type: 'REQUEST_VERIFY_SLOT' }
+  | { type: 'RESEND_RESOLVE_FOLLOW_UP' };
+
+type PhaseEvent = RunToPhase | AgentToParent | Resend;
+
+/**
+ * An invoked actor that sends one internal event when it starts. XState restarts invocations on
+ * restore and does not re-run entry actions (§5.7), so a state that only asks for something on
+ * entry waits forever after a restore; invoking this makes the ask happen on both.
+ */
+function askOnStart(event: Resend) {
+  return fromCallback<Resend>(({ sendBack }) => {
+    sendBack(event);
+  });
+}
 
 const BUILDER_TIMEOUT_MS = 30 * 60_000;
 const OTHER_TIMEOUT_MS = 15 * 60_000;
@@ -183,6 +212,7 @@ function initialContext(input: PhaseInput): PhaseContext {
     findings: {},
     overrides: [],
     slot: null,
+    verificationResult: null,
     proofFiles: [],
     proofItems: [],
     verifierDone: false,
@@ -351,6 +381,10 @@ export const phaseMachine = setup({
     agent: fromCallback<AgentToParent, AgentJob>(() => {
       throw new Error('agent not provided');
     }) as AnyActorLogic,
+    /** Asks the run for a verification slot; the run answers a phase that asks again (§7.4). */
+    requestVerifySlot: askOnStart({ type: 'REQUEST_VERIFY_SLOT' }),
+    /** Puts the conflict instructions into the builder's session, again after a restore (§7.3). */
+    resolveTurn: askOnStart({ type: 'RESEND_RESOLVE_FOLLOW_UP' }),
     ensureWorktree: fromPromise<EnsureWorktreeOutput, EnsureWorktreeInput>(async () => {
       throw new Error('ensureWorktree not provided');
     }),
@@ -443,8 +477,9 @@ export const phaseMachine = setup({
         const children = [...context.children];
         for (const task of context.tasks) {
           if (children.some((child) => child.id === task.builderId)) continue;
-          spawn('agent', { id: task.builderId, input: builderJob(context, task) });
-          children.push({ id: task.builderId, key: task.key });
+          const job = builderJob(context, task);
+          spawn('agent', { id: task.builderId, input: job });
+          children.push({ id: task.builderId, key: job.key, keepAlive: job.keepAlive, live: true });
         }
         return children;
       },
@@ -523,8 +558,9 @@ export const phaseMachine = setup({
         const children = [...context.children];
         for (const reviewer of context.reviewers) {
           if (reviewer.done || children.some((child) => child.id === reviewer.id)) continue;
-          spawn('agent', { id: reviewer.id, input: reviewerJob(context, reviewer) });
-          children.push({ id: reviewer.id, key: reviewer.key });
+          const job = reviewerJob(context, reviewer);
+          spawn('agent', { id: reviewer.id, input: job });
+          children.push({ id: reviewer.id, key: job.key, keepAlive: job.keepAlive, live: true });
         }
         return children;
       },
@@ -594,8 +630,14 @@ export const phaseMachine = setup({
 
     // ── verifying ─────────────────────────────────────────────────────────────────────
     recordSlot: assign({ slot: ({ event }) => asSlotGranted(event).slot }),
+    /** Asks the run for a verification slot (§7.4); the run grants a slot it holds again. */
+    sendSlotRequest: sendParent(({ context }) => ({ type: 'PHASE_VERIFY_SLOT_REQUEST' as const, phaseId: context.phase.id })),
     recordVerification: assign({
       proofFiles: ({ event }) => doneOutput<RunVerificationOutput>(event).proofFiles,
+      verificationResult: ({ event }) => {
+        const output = doneOutput<RunVerificationOutput>(event);
+        return { passed: output.passed, steps: output.steps };
+      },
     }),
     blockOnVerifySetup: assign({
       blocker: ({ event }) => verifyBlocker('verify-setup', doneOutput<RunVerificationOutput>(event)),
@@ -647,8 +689,9 @@ export const phaseMachine = setup({
     spawnVerifier: assign({
       children: ({ context, spawn }) => {
         if (childOf(context, 'verifier') !== undefined) return context.children;
-        spawn('agent', { id: 'verifier', input: verifierJob(context) });
-        return [...context.children, { id: 'verifier', key: `${context.runId}/${context.phase.id}/verifier` }];
+        const job = verifierJob(context);
+        spawn('agent', { id: 'verifier', input: job });
+        return [...context.children, { id: 'verifier', key: job.key, keepAlive: job.keepAlive, live: true }];
       },
     }),
     recordVerifierResult: assign({
@@ -758,8 +801,22 @@ export const phaseMachine = setup({
     }),
 
     // ── closing out ───────────────────────────────────────────────────────────────────
+    /**
+     * A child that reported is only still up when it keeps alive and its turn went well: every
+     * other session closed itself (§5.5), and CLOSE to a stopped actor is a lost event.
+     */
+    markChildReported: assign({
+      children: ({ context, event }) => {
+        const result = asAgentResult(event);
+        return context.children.map((child) =>
+          child.key === result.key ? { ...child, live: child.keepAlive && result.outcome.status === 'done' } : child,
+        );
+      },
+    }),
     closeChildren: enqueueActions(({ context, enqueue }) => {
-      for (const child of context.children) enqueue.sendTo(child.id, { type: 'CLOSE' });
+      for (const child of context.children) {
+        if (child.live) enqueue.sendTo(child.id, { type: 'CLOSE' });
+      }
     }),
     sendDone: sendParent(({ context }) => ({ type: 'PHASE_DONE' as const, phaseId: context.phase.id })),
     sendStopped: sendParent(({ context }) => ({
@@ -817,8 +874,8 @@ export const phaseMachine = setup({
       ],
       on: {
         AGENT_RESULT: [
-          { guard: 'builderFailed', target: 'deciding', actions: ['recordBuilderResult', 'blockOnBuild'] },
-          { actions: 'recordBuilderResult' },
+          { guard: 'builderFailed', target: 'deciding', actions: ['markChildReported', 'recordBuilderResult', 'blockOnBuild'] },
+          { actions: ['markChildReported', 'recordBuilderResult'] },
         ],
       },
     },
@@ -837,11 +894,12 @@ export const phaseMachine = setup({
     },
 
     resolving: {
-      entry: 'sendResolveFollowUp',
+      invoke: { id: 'resolveTurn', src: 'resolveTurn' },
       on: {
+        RESEND_RESOLVE_FOLLOW_UP: { actions: 'sendResolveFollowUp' },
         AGENT_RESULT: [
-          { guard: 'resolverFailed', target: 'deciding', actions: 'blockOnResolverFailure' },
-          { guard: 'fromResolver', target: 'merging', actions: 'markResolved' },
+          { guard: 'resolverFailed', target: 'deciding', actions: ['markChildReported', 'blockOnResolverFailure'] },
+          { guard: 'fromResolver', target: 'merging', actions: ['markChildReported', 'markResolved'] },
         ],
       },
     },
@@ -855,15 +913,18 @@ export const phaseMachine = setup({
       ],
       on: {
         AGENT_RESULT: [
-          { guard: 'reviewFailed', target: 'deciding', actions: 'recordReviewFailure' },
-          { actions: ['recordReviewResult', 'sendFindings'] },
+          { guard: 'reviewFailed', target: 'deciding', actions: ['markChildReported', 'recordReviewFailure'] },
+          { actions: ['markChildReported', 'recordReviewResult', 'sendFindings'] },
         ],
       },
     },
 
     queuedForVerify: {
-      entry: sendParent(({ context }) => ({ type: 'PHASE_VERIFY_SLOT_REQUEST' as const, phaseId: context.phase.id })),
-      on: { VERIFY_SLOT_GRANTED: { target: 'verifying', actions: 'recordSlot' } },
+      invoke: { id: 'requestVerifySlot', src: 'requestVerifySlot' },
+      on: {
+        REQUEST_VERIFY_SLOT: { actions: 'sendSlotRequest' },
+        VERIFY_SLOT_GRANTED: { target: 'verifying', actions: 'recordSlot' },
+      },
     },
 
     verifying: {
@@ -897,13 +958,18 @@ export const phaseMachine = setup({
       always: [{ guard: 'verifierPending', actions: 'spawnVerifier' }],
       on: {
         AGENT_RESULT: [
-          { guard: 'verifierFailed', target: 'deciding', actions: ['recordVerifierResult', 'blockOnProofFailure'] },
+          { guard: 'verifierFailed', target: 'deciding', actions: ['markChildReported', 'recordVerifierResult', 'blockOnProofFailure'] },
           // Re-enter so checkProof sees the verifier's items as well.
-          { target: 'proving', reenter: true, actions: 'recordVerifierResult' },
+          { target: 'proving', reenter: true, actions: ['markChildReported', 'recordVerifierResult'] },
         ],
       },
     },
 
+    /**
+     * The PM is asked on entry only: unlike a slot or a follow-up, the request itself lives in the
+     * PM's own persisted queue (§5.4), so a restore of `deciding` still gets its answer and asking
+     * again would only queue a second decision about the same blocker.
+     */
     deciding: {
       entry: 'askPm',
       on: {
@@ -943,8 +1009,8 @@ export const phaseMachine = setup({
       always: [{ guard: 'fixBuilderReady', actions: 'sendFixFollowUp' }],
       on: {
         AGENT_RESULT: [
-          { guard: 'builderFailed', target: 'deciding', actions: ['recordBuilderResult', 'blockOnBuild'] },
-          { target: 'merging', actions: ['recordBuilderResult', 'reopenFixedTask'] },
+          { guard: 'builderFailed', target: 'deciding', actions: ['markChildReported', 'recordBuilderResult', 'blockOnBuild'] },
+          { target: 'merging', actions: ['markChildReported', 'recordBuilderResult', 'reopenFixedTask'] },
         ],
       },
     },

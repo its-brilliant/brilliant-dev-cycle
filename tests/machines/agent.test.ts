@@ -537,8 +537,30 @@ describe('agentMachine', () => {
 
     const context = harness.agent.getSnapshot().context as unknown as Record<string, unknown>;
     expect(JSON.parse(JSON.stringify(context))).toEqual(context);
-    expect(context.pendingSend).toEqual({ terminal: TERMINAL, text: 'fix it' });
+    expect(context.pendingSend).toEqual({ text: 'fix it' });
     expect(context.agentState).toBe('done');
+  });
+
+  it('queues a follow-up that arrives while launching and sends it once the terminal is up', async () => {
+    const job = { ...jobFor(recordings[4]!), keepAlive: true };
+    const harness = startAgent(job, { launch: 'hold' });
+    await flush();
+    expect(harness.agent.getSnapshot().value).toBe('launching');
+
+    // The parent asks for a turn before it knows whether the terminal exists (§5.4).
+    harness.agent.send({ type: 'FOLLOW_UP', prompt: 'start the intake' });
+    await flush();
+    expect(harness.sent).toEqual([]);
+    expect(harness.agent.getSnapshot().context.pendingSend).toEqual({ text: 'start the intake' });
+
+    harness.release();
+    await flush();
+    expect(harness.sent).toEqual([{ terminal: TERMINAL, text: 'start the intake' }]);
+    expect(harness.agent.getSnapshot().context.pendingSend).toBeNull();
+    expect(harness.agent.getSnapshot().value).toEqual({ running: { active: 'working' } });
+
+    // The observer was attached to the terminal the launch reported, not to an empty one.
+    expect(harness.observers.at(-1)?.input.terminal).toBe(TERMINAL);
   });
 
   describe('CLOSE', () => {
@@ -708,7 +730,7 @@ describe('agentMachine', () => {
     // What each state reacts to: its own `on` plus its ancestors'. Every other event it drops on
     // purpose, so a transition that stops (or starts) handling an event has to change this table.
     const expected: Record<string, string[]> = {
-      launching: ['CLOSE'],
+      launching: ['CLOSE', 'FOLLOW_UP'],
       running: ['CLOSE', 'OBS_EXITED'],
       'running.active': ['CLOSE', 'OBS_ASKING', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_STATUS', 'OBS_SUBMITTED'],
       'running.active.working': ['CLOSE', 'OBS_ASKING', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_STATUS', 'OBS_SUBMITTED'],

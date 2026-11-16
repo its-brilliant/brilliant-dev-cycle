@@ -12,15 +12,20 @@
  * arrives it is recorded in the transcript and `PM_ASK_DONE` tells the run the ask is done. The
  * agent's own `AGENT_ASK_DONE` (its `ask_user` call returned) reports the same thing.
  *
- * Deliberately ignored: `CLOSE` (the daemon closes the run's terminals when the run ends, §5.5) and
- * `AGENT_NEEDS_YOU` (a trust or permission prompt for the PM has no `PmToRun` event in the
- * contracts, so the PM's own prompts are not surfaced here yet).
+ * A turn is put into the session by an invoked actor, not by an entry action, so a restore of
+ * `thinking` re-establishes it: XState restarts invocations and does not re-run entry actions
+ * (§5.7). A `FOLLOW_UP` that arrives before the session's terminal is up is queued by the agent
+ * machine, so the turn cannot be lost in the gap either.
+ *
+ * `CLOSE` from the run (the run ended, §5.5) goes on to the agent, which closes its terminal. A
+ * trust or permission prompt of the session's terminal is forwarded to the run as `AGENT_NEEDS_YOU`
+ * and the person's `PROMPT_CHOICE` comes back the same way (§3.3): `PmToRun`/`RunToPm` have no
+ * shapes for those two yet, so the PM reuses the person event and the agent event.
  */
 import {
   assign,
   enqueueActions,
   fromCallback,
-  sendTo,
   setup,
   type AnyActorLogic,
   type EventObject,
@@ -43,6 +48,20 @@ const PM_TIMEOUT_MS = 15 * 60 * 1000;
 
 /** A request that becomes a PM turn. `ANSWER` is not one: it is recorded where it arrives (above). */
 export type PmRequest = Extract<RunToPm, { type: 'INTAKE' | 'MESSAGE' | 'DECIDE' }> & { id: string };
+
+/** The person's answer to an agent prompt (§3.3). `RunToPm` has no shape for it yet, so it is the
+ * person event itself: the run hands it to the PM, which checks the key against its own session. */
+type PmPromptChoice = Extract<PersonEvent, { type: 'PROMPT_CHOICE' }>;
+
+/**
+ * The turn invocation telling this machine to paste the current request into the PM session. It is
+ * an internal event of this machine, not something the run sends.
+ */
+type PmMachineEvent =
+  | RunToPm
+  | AgentToParent
+  | PmPromptChoice
+  | { type: 'DELIVER_REQUEST'; agentId: string; prompt: string };
 
 /** One thing said in the PM conversation; a restarted session is primed with all of them. */
 export interface TranscriptEntry {
@@ -214,11 +233,21 @@ function questionsNote(questions: Question[]): string {
 export const pmMachine = setup({
   types: {
     context: {} as PmContext,
-    events: {} as RunToPm | AgentToParent,
+    events: {} as PmMachineEvent,
     input: {} as PmInput,
   },
   actors: {
     agent: notProvided('agent'),
+    /**
+     * Puts the current request into the PM session as a turn. It is an invoked actor, not an entry
+     * action, because XState restarts invocations on restore and does not re-run entry actions
+     * (§5.7): a PM restored in `thinking` would otherwise wait for an artifact nobody asked for.
+     * The agent machine queues a FOLLOW_UP that arrives before its terminal is up, so this cannot
+     * be lost while the session starts either.
+     */
+    deliverRequest: fromCallback<PmMachineEvent, { agentId: string; prompt: string }>(({ input, sendBack }) => {
+      sendBack({ type: 'DELIVER_REQUEST', agentId: input.agentId, prompt: input.prompt });
+    }),
   },
   guards: {
     /** There is a request waiting for a turn. */
@@ -259,6 +288,20 @@ export const pmMachine = setup({
     }),
     stopPmAgent: enqueueActions(({ context, enqueue }) => {
       enqueue.stopChild(context.agentId);
+    }),
+    /** The run is over: the session's terminal goes with it (§5.5). */
+    closePmAgent: enqueueActions(({ context, enqueue }) => {
+      enqueue.sendTo(context.agentId, { type: 'CLOSE' });
+    }),
+    /** A trust or permission prompt of the PM's own session is the person's to answer (§3.3). */
+    forwardNeedsYou: enqueueActions(({ context, event, enqueue }) => {
+      if (event.type !== 'AGENT_NEEDS_YOU' || event.key !== context.agentKey) return;
+      enqueue.sendParent({ type: 'AGENT_NEEDS_YOU', key: event.key, prompt: event.prompt, choices: event.choices });
+    }),
+    /** The person's choice becomes keys in the session, once the key names this session (§3.3). */
+    forwardPromptChoice: enqueueActions(({ context, event, enqueue }) => {
+      if (event.type !== 'PROMPT_CHOICE' || event.agentKey !== context.agentKey) return;
+      enqueue.sendTo(context.agentId, { type: 'PROMPT_CHOICE', choice: event.choice });
     }),
     countRestart: assign({ restarts: ({ context }) => context.restarts + 1 }),
     countTurn: assign({ turns: ({ context }) => context.turns + 1 }),
@@ -306,10 +349,10 @@ export const pmMachine = setup({
       failure: ({ event }) => (event.type === 'AGENT_RESULT' && event.outcome.status !== 'done' ? event.outcome.detail : 'the PM produced no result'),
     }),
     /** Sends the current request into the PM session as a turn (and again after a restart). */
-    sendRequestToAgent: sendTo(({ context }) => context.agentId, ({ context }) => ({
-      type: 'FOLLOW_UP',
-      prompt: context.current === null ? '' : requestPrompt(context.current),
-    })),
+    sendRequestToAgent: enqueueActions(({ event, enqueue }) => {
+      if (event.type !== 'DELIVER_REQUEST') return;
+      enqueue.sendTo(event.agentId, { type: 'FOLLOW_UP', prompt: event.prompt });
+    }),
     sendResultToRun: enqueueActions(({ context, event, enqueue }) => {
       if (event.type !== 'AGENT_RESULT' || event.outcome.status !== 'done' || context.current === null) return;
       const mapped = submissionToRun(context.current, event.outcome.submission);
@@ -361,6 +404,11 @@ export const pmMachine = setup({
   // An answer is never a turn: wherever it arrives it is recorded and the ask is reported done.
   on: {
     ANSWER: { actions: ['recordAnswer', 'sendAnswered'] },
+    // The run closed the session: the agent closes its terminal, so nothing is left behind (§5.5).
+    CLOSE: { actions: 'closePmAgent' },
+    // The PM's own prompt cards: the run shows them, the person answers with PROMPT_CHOICE (§3.3).
+    AGENT_NEEDS_YOU: { actions: 'forwardNeedsYou' },
+    PROMPT_CHOICE: { actions: 'forwardPromptChoice' },
   },
   states: {
     /** The PM session is coming up: new, or primed from the transcript. */
@@ -380,8 +428,16 @@ export const pmMachine = setup({
 
     /** One PM turn: the request went into the session and its artifact is on the way. */
     thinking: {
-      entry: 'sendRequestToAgent',
+      invoke: {
+        id: 'deliverRequest',
+        src: 'deliverRequest',
+        input: ({ context }) => ({
+          agentId: context.agentId,
+          prompt: context.current === null ? '' : requestPrompt(context.current),
+        }),
+      },
       on: {
+        DELIVER_REQUEST: { actions: 'sendRequestToAgent' },
         INTAKE: { actions: 'enqueueRequest' },
         MESSAGE: { actions: 'enqueueRequest' },
         DECIDE: { actions: 'enqueueRequest' },

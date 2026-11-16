@@ -20,9 +20,10 @@
  * v2.0 has no fix at run level (§4.5): the PM's decision on a blocking final review can only
  * continue (→ shipping) or stop (→ failed); a `fix` decision there is treated as a stop.
  *
- * Deliberately ignored: `PHASE_FINDINGS` (a phase's findings reach the run inside its blocker and
- * its `PHASE_NEEDS_PM`, §5.3) and `AGENT_NEEDS_YOU` (a trust prompt for a stage agent has no event
- * in `RunToPhase`/`PmToRun` to carry it to the person yet).
+ * `AGENT_NEEDS_YOU` arrives from any agent (a phase child forwards its own, the PM its session's)
+ * and becomes a prompt card the person answers with `PROMPT_CHOICE`, which the run hands to whoever
+ * holds that job key (§3.3). `PHASE_FINDINGS` is still deliberately ignored: a phase's findings
+ * reach the run inside its blocker and its `PHASE_NEEDS_PM` (§5.3).
  */
 import {
   assign,
@@ -45,6 +46,7 @@ import {
   type Lens,
   type PlanPhase,
   type ProjectConfig,
+  type Question,
   type Severity,
   type SpecComment,
   type VerificationSetup,
@@ -145,7 +147,14 @@ interface RunContext {
   reviewStarted: boolean;
   reviewPending: string[];
   reviewFindings: Record<string, Finding[]>;
-  asking: { scope: string | null; askId: string } | null;
+  /** The `ask_user` call that is waiting for the person, with the questions it asked (§3.4, §7.2). */
+  asking: { scope: string | null; askId: string; questions: Question[] } | null;
+  /**
+   * Trust and permission prompts of running agents, by the agent's job key (§3.3). A phase child
+   * forwards its agents' prompts, the PM forwards its own; each is dropped when the person answers
+   * it or when that agent moves on.
+   */
+  agentPrompts: Array<{ agentKey: string; prompt: string; choices: string[] }>;
   chat: ChatEntry[];
   proposals: Record<string, PersonEvent>;
   deferred: RunEvent[];
@@ -291,6 +300,15 @@ function grantQueued(context: RunContext): { held: string[]; queue: string[]; gr
 
 function outcomeDetail(outcome: AgentToParent extends never ? never : Extract<AgentToParent, { type: 'AGENT_RESULT' }>['outcome']): string {
   return outcome.status === 'done' ? 'the agent submitted a result the run could not use' : `${outcome.status}: ${outcome.detail}`;
+}
+
+/**
+ * The phase a job key belongs to, or `null` when the key is not one of a phase's agents. Every key
+ * the run makes starts with the run id and then names the phase or the stage (§5.3, §4.2).
+ */
+function phaseIdOfKey(context: RunContext, key: string): string | null {
+  const [, scope] = key.split('/');
+  return scope !== undefined && context.phases[scope] !== undefined ? scope : null;
 }
 
 /** The stage agent a reporting key belongs to, or `null` for a child that is not a stage agent. */
@@ -498,7 +516,7 @@ export const runMachine = setup({
     }),
     recordAsking: enqueueActions(({ context, event, enqueue }) => {
       if (event.type !== 'PM_ASKING') return;
-      enqueue.assign({ asking: { scope: event.scope, askId: event.askId } });
+      enqueue.assign({ asking: { scope: event.scope, askId: event.askId, questions: event.questions } });
       // A phase that raised the question waits for it (§5.3).
       if (event.scope !== null && context.phases[event.scope] === 'active') {
         enqueue.sendTo(phaseChildId(event.scope), { type: 'PM_ASKING' });
@@ -621,7 +639,10 @@ export const runMachine = setup({
       enqueue.assign({ spawns: cursor.spawns, stageSpawns: cursor.stageSpawns, stageAgents: cursor.stageAgents });
       for (const job of jobs) enqueue.spawnChild('agent', job);
     }),
-    /** A stage agent reported, so its slot is free again; the next round gets a new key. */
+    /**
+     * A stage agent reported, so its slot is free again and the next round gets a new key; a prompt
+     * it left behind is moot, because the agent has moved on (§3.3).
+     */
     clearStageAgent: assign({
       stageAgents: ({ context, event }) => {
         if (event.type !== 'AGENT_RESULT') return context.stageAgents;
@@ -631,6 +652,10 @@ export const runMachine = setup({
         }
         return stageAgents;
       },
+      agentPrompts: ({ context, event }) =>
+        event.type === 'AGENT_RESULT'
+          ? context.agentPrompts.filter((prompt) => prompt.agentKey !== event.key)
+          : context.agentPrompts,
     }),
     recordAgentFailure: assign({
       error: ({ context, event }) => ({
@@ -790,7 +815,13 @@ export const runMachine = setup({
     requestSlot: enqueueActions(({ context, event, enqueue }) => {
       if (event.type !== 'PHASE_VERIFY_SLOT_REQUEST') return;
       const { phaseId } = event;
-      if (context.verifySlots.held.includes(phaseId) || context.verifyQueue.includes(phaseId)) return;
+      // A phase asks again when it is restored: it may have missed the grant, so say it again.
+      const held = context.verifySlots.held.indexOf(phaseId);
+      if (held >= 0) {
+        enqueue.sendTo(phaseChildId(phaseId), { type: 'VERIFY_SLOT_GRANTED', slot: held });
+        return;
+      }
+      if (context.verifyQueue.includes(phaseId)) return;
       const slot = freeSlot(context.verifySlots.held, context.verifySlots.max);
       if (slot === null) {
         enqueue.assign({ verifyQueue: [...context.verifyQueue, phaseId] });
@@ -828,14 +859,56 @@ export const runMachine = setup({
         enqueue.sendTo(phaseChildId(event.phaseId), { type: 'OVERRIDE', lens: event.lens, reason: event.reason, who: 'person' });
       }
     }),
+    /** A trust or permission prompt from any agent: a phase child's, a stage agent's, the PM's (§3.3). */
+    recordAgentPrompt: assign({
+      agentPrompts: ({ context, event }) =>
+        event.type === 'AGENT_NEEDS_YOU'
+          ? [
+              ...context.agentPrompts.filter((prompt) => prompt.agentKey !== event.key),
+              { agentKey: event.key, prompt: event.prompt, choices: event.choices },
+            ]
+          : context.agentPrompts,
+    }),
+    /** Every prompt of a phase's agents goes when the phase settles: those sessions are closed. */
+    clearPhasePrompts: enqueueActions(({ context, event, enqueue }) => {
+      if (event.type !== 'PHASE_DONE' && event.type !== 'PHASE_STOPPED') return;
+      enqueue.assign({
+        agentPrompts: context.agentPrompts.filter((prompt) => phaseIdOfKey(context, prompt.agentKey) !== event.phaseId),
+      });
+    }),
+    /**
+     * The person's answer to an agent prompt (§3.3). The choice goes to whoever holds that key: a
+     * phase child routes it to its own agents, a stage agent has the key itself, and the PM checks
+     * the key against its session before sending the keys.
+     */
     promptChoice: enqueueActions(({ context, event, enqueue }) => {
       if (event.type !== 'PROMPT_CHOICE') return;
+      enqueue.assign({ agentPrompts: context.agentPrompts.filter((prompt) => prompt.agentKey !== event.agentKey) });
       for (const [phaseId, status] of Object.entries(context.phases)) {
         if (status !== 'active') continue;
         enqueue.sendTo(phaseChildId(phaseId), { type: 'PROMPT_CHOICE', agentKey: event.agentKey, choice: event.choice });
       }
-      for (const agent of Object.values(context.stageAgents)) {
-        enqueue.sendTo(agent.id, { type: 'PROMPT_CHOICE', choice: event.choice });
+      const stage = Object.values(context.stageAgents).find((agent) => agent.key === event.agentKey);
+      if (stage !== undefined) enqueue.sendTo(stage.id, { type: 'PROMPT_CHOICE', choice: event.choice });
+      enqueue.sendTo('pm', { type: 'PROMPT_CHOICE', agentKey: event.agentKey, choice: event.choice });
+    }),
+    /**
+     * The run is over, so no session is needed any more (§5.5): the PM and every stage agent still
+     * on record are told to close, and the PM passes it on to its own agent. A stage agent that
+     * already reported closed itself and is no longer on record, so nothing is sent to a stopped
+     * actor.
+     */
+    closeAgents: enqueueActions(({ context, enqueue }) => {
+      enqueue.sendTo('pm', { type: 'CLOSE' });
+      for (const agent of Object.values(context.stageAgents)) enqueue.sendTo(agent.id, { type: 'CLOSE' });
+      // Nothing is running any more, so no prompt can still be waiting for the person.
+      enqueue.assign({ agentPrompts: [] });
+    }),
+    /** Cancel stops every phase child, which closes its own agents (§5.3). */
+    cancelPhases: enqueueActions(({ context, enqueue }) => {
+      for (const [phaseId, status] of Object.entries(context.phases)) {
+        if (status !== 'active') continue;
+        enqueue.sendTo(phaseChildId(phaseId), { type: 'CANCEL' });
       }
     }),
     pauseChildren: enqueueActions(({ context, enqueue }) => {
@@ -937,6 +1010,7 @@ export const runMachine = setup({
     reviewPending: [],
     reviewFindings: {},
     asking: null,
+    agentPrompts: [],
     chat: [],
     proposals: {},
     deferred: [],
@@ -958,6 +1032,7 @@ export const runMachine = setup({
     APPLY_PROPOSAL: [{ guard: 'hasProposal', actions: 'raiseProposal' }],
     DISCARD_PROPOSAL: { actions: 'discardProposal' },
     PROMPT_CHOICE: { actions: 'promptChoice' },
+    AGENT_NEEDS_YOU: { actions: 'recordAgentPrompt' },
     OVERRIDE: { actions: 'recordOverride' },
     PM_DECISION: { actions: 'recordDecision' },
     PAUSE: { target: '#run.paused', actions: 'pauseChildren' },
@@ -1029,8 +1104,8 @@ export const runMachine = setup({
           entry: ['stageBuilding', 'initPhases', 'schedulePhases'],
           always: [{ guard: 'allPhasesSettled', target: '#run.active.finalReview' }],
           on: {
-            PHASE_DONE: { actions: ['markPhaseDone', 'releaseSlot', 'schedulePhases', 'broadcastDepDone'] },
-            PHASE_STOPPED: { actions: ['markPhaseStopped', 'releaseSlot', 'schedulePhases'] },
+            PHASE_DONE: { actions: ['markPhaseDone', 'releaseSlot', 'schedulePhases', 'broadcastDepDone', 'clearPhasePrompts'] },
+            PHASE_STOPPED: { actions: ['markPhaseStopped', 'releaseSlot', 'schedulePhases', 'clearPhasePrompts'] },
             PHASE_NEEDS_PM: { actions: 'askPmAboutPhase' },
             PHASE_VERIFY_SLOT_REQUEST: { actions: 'requestSlot' },
             PHASE_VERIFY_SLOT_RELEASE: { actions: 'releaseSlot' },
@@ -1111,8 +1186,15 @@ export const runMachine = setup({
       },
     },
 
-    done: { id: 'run.done', type: 'final' },
+    /** The run is finished: the pull request is opened, so every terminal goes (§5.5). */
+    done: { id: 'run.done', type: 'final', entry: 'closeAgents' },
 
+    /**
+     * Nothing is closed here on purpose: `failed` is not final, and RETRY re-enters the stage that
+     * failed, which re-attaches to the sessions by `bdc.key` (§3.2, §5.7). Closing them would leave
+     * a retried run with dead terminals. A run the person gives up on is cancelled, and that closes
+     * everything (§5.5).
+     */
     failed: {
       id: 'run.failed',
       on: {
@@ -1121,6 +1203,7 @@ export const runMachine = setup({
       },
     },
 
-    cancelled: { id: 'run.cancelled', type: 'final' },
+    /** Cancelled closes every terminal it still has, phases included (§5.5). */
+    cancelled: { id: 'run.cancelled', type: 'final', entry: ['cancelPhases', 'closeAgents'] },
   },
 });

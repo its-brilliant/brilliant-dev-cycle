@@ -67,6 +67,8 @@ interface Log {
   phases: string[];
   phaseReceived: Map<string, RunToPhase[]>;
   agents: AgentJob[];
+  /** The prompt choices a stage agent was sent, by its job key (§3.3). */
+  promptChoices: Array<{ key: string; choice: string }>;
   prInputs: OpenPullRequestInput[];
 }
 
@@ -130,6 +132,9 @@ function agentStub(log: Log) {
       recordAgent: ({ context }) => {
         log.agents.push(context);
       },
+      recordChoice: ({ context, event }) => {
+        if (event.type === 'PROMPT_CHOICE') log.promptChoices.push({ key: context.key, choice: event.choice });
+      },
       step: enqueueActions(({ context, event, enqueue }) => {
         if (event.type !== 'TEST_STEP') return;
         enqueue.sendParent({ type: 'AGENT_RESULT', key: context.key, outcome: event.outcome });
@@ -139,7 +144,7 @@ function agentStub(log: Log) {
     context: ({ input }) => input,
     entry: 'recordAgent',
     initial: 'on',
-    states: { on: { on: { TEST_STEP: { actions: 'step' } } } },
+    states: { on: { on: { TEST_STEP: { actions: 'step' }, PROMPT_CHOICE: { actions: 'recordChoice' } } } },
   });
 }
 
@@ -173,7 +178,15 @@ function stageName(value: StateValue): string {
 }
 
 function harness(options: { config?: ProjectConfig; pr?: 'ok' | 'fail' } = {}) {
-  const log: Log = { pms: [], pmReceived: [], phases: [], phaseReceived: new Map(), agents: [], prInputs: [] };
+  const log: Log = {
+    pms: [],
+    pmReceived: [],
+    phases: [],
+    phaseReceived: new Map(),
+    agents: [],
+    promptChoices: [],
+    prInputs: [],
+  };
   const input: RunInput = {
     runId: 'r1',
     root: '/repo',
@@ -271,13 +284,10 @@ describe('runMachine', () => {
     expect(test.log.pmReceived[0]).toEqual({ type: 'INTAKE', goal: 'Ship a health check' });
 
     // A grilling round: the question reaches the run, the answer goes back to the PM.
-    test.pmEmit({
-      type: 'PM_ASKING',
-      scope: null,
-      askId: 'ask-1',
-      questions: [{ id: 'q1', title: 'Which provider?', body: '', kind: 'single', options: [], allowOther: true }],
-    });
-    expect(test.context().asking).toEqual({ scope: null, askId: 'ask-1' });
+    const grilling = [{ id: 'q1', title: 'Which provider?', body: '', kind: 'single' as const, options: [], allowOther: true }];
+    test.pmEmit({ type: 'PM_ASKING', scope: null, askId: 'ask-1', questions: grilling });
+    // The questions are kept, not only the ask id, so the view can show the card (§3.4, §7.2).
+    expect(test.context().asking).toEqual({ scope: null, askId: 'ask-1', questions: grilling });
     test.send({ type: 'ROUND_ANSWERED', answers: [{ questionId: 'q1', picked: ['google'], text: '', skipped: false }] });
     expect(test.log.pmReceived[1]).toMatchObject({ type: 'ANSWER', askId: 'ask-1' });
     test.pmEmit({ type: 'PM_ASK_DONE', askId: 'ask-1' });
@@ -448,6 +458,24 @@ describe('runMachine', () => {
     expect(test.log.phases).toEqual(['p1', 'p2', 'p3']);
   });
 
+  it('grants a held verification slot again when the phase asks after a restore', () => {
+    const test = harness();
+    toBuilding(test);
+    test.phaseEmit('p1', { type: 'PHASE_VERIFY_SLOT_REQUEST', phaseId: 'p1' });
+    expect(test.phaseSaw('p1')).toEqual([{ type: 'VERIFY_SLOT_GRANTED', slot: 0 }]);
+
+    // The grant was in flight when the daemon died: the restored phase asks again (§5.7, §7.4).
+    test.restore();
+    expect(test.context().verifySlots.held).toEqual(['p1']);
+    test.phaseEmit('p1', { type: 'PHASE_VERIFY_SLOT_REQUEST', phaseId: 'p1' });
+    expect(test.phaseSaw('p1')).toEqual([
+      { type: 'VERIFY_SLOT_GRANTED', slot: 0 },
+      { type: 'VERIFY_SLOT_GRANTED', slot: 0 },
+    ]);
+    // The slot is still held once, not twice.
+    expect(test.context().verifySlots.held).toEqual(['p1']);
+  });
+
   it('sends the PM a decision request for the blocked phase, and the decision to that phase only', () => {
     const test = harness({ config: configOf({ concurrency: 2 }) });
     toBuilding(test, WIDE_PLAN);
@@ -484,14 +512,58 @@ describe('runMachine', () => {
     expect(test.context().overrides.at(-1)).toMatchObject({ phaseId: 'p1', who: 'person' });
 
     // The PM's question reaches the phase that raised it.
-    test.pmEmit({
-      type: 'PM_ASKING',
-      scope: 'p2',
-      askId: 'ask-2',
-      questions: [{ id: 'q1', title: 'Ship without the test?', body: '', kind: 'confirm', options: [], allowOther: false }],
-    });
+    const questions = [
+      { id: 'q1', title: 'Ship without the test?', body: '', kind: 'confirm' as const, options: [], allowOther: false },
+    ];
+    test.pmEmit({ type: 'PM_ASKING', scope: 'p2', askId: 'ask-2', questions });
     expect(test.phaseSaw('p2')).toContainEqual({ type: 'PM_ASKING' });
-    expect(test.context().asking).toEqual({ scope: 'p2', askId: 'ask-2' });
+    expect(test.context().asking).toEqual({ scope: 'p2', askId: 'ask-2', questions });
+  });
+
+  it('turns an agent prompt into a card and hands the choice to the agent that holds that key', () => {
+    const test = harness();
+    toBuilding(test);
+    const trust = { prompt: 'Trust this folder?', choices: ['Trust', "Don't"] };
+
+    // A phase child forwards its builder's prompt (§3.3).
+    test.send({ type: 'AGENT_NEEDS_YOU', key: 'r1/p1/builder', ...trust });
+    expect(test.context().agentPrompts).toEqual([{ agentKey: 'r1/p1/builder', ...trust }]);
+
+    // The choice goes to the phase, which routes it to that builder, and the card goes away.
+    test.send({ type: 'PROMPT_CHOICE', agentKey: 'r1/p1/builder', choice: 'Trust' });
+    expect(test.phaseSaw('p1')).toContainEqual({ type: 'PROMPT_CHOICE', agentKey: 'r1/p1/builder', choice: 'Trust' });
+    expect(test.context().agentPrompts).toEqual([]);
+
+    // The PM's own session's prompt is a card too, and the choice goes back to the PM.
+    test.send({ type: 'AGENT_NEEDS_YOU', key: 'r1/pm', ...trust });
+    expect(test.context().agentPrompts.map((prompt) => prompt.agentKey)).toEqual(['r1/pm']);
+    test.send({ type: 'PROMPT_CHOICE', agentKey: 'r1/pm', choice: 'Trust' });
+    expect(test.log.pmReceived.at(-1)).toEqual({ type: 'PROMPT_CHOICE', agentKey: 'r1/pm', choice: 'Trust' });
+    expect(test.context().agentPrompts).toEqual([]);
+
+    // A phase that settles takes the prompts of its agents with it: those sessions are closed.
+    test.send({ type: 'AGENT_NEEDS_YOU', key: 'r1/p1/builder', ...trust });
+    test.phaseEmit('p1', { type: 'PHASE_DONE', phaseId: 'p1' });
+    expect(test.context().agentPrompts).toEqual([]);
+  });
+
+  it('gives a stage agent its prompt choice, and forgets the prompt when it moves on', () => {
+    const test = harness();
+    test.send({ type: 'UNDERSTANDING_CONFIRMED' });
+    test.pmEmit({ type: 'PM_BRIEF', brief: BRIEF });
+    expect(test.stage()).toBe('specDrafting');
+    const trust = { prompt: 'Trust this folder?', choices: ['Trust', "Don't"] };
+
+    test.send({ type: 'AGENT_NEEDS_YOU', key: 'r1/spec/1', ...trust });
+    expect(test.context().agentPrompts).toEqual([{ agentKey: 'r1/spec/1', ...trust }]);
+    test.send({ type: 'PROMPT_CHOICE', agentKey: 'r1/spec/1', choice: 'Trust' });
+    expect(test.log.promptChoices).toEqual([{ key: 'r1/spec/1', choice: 'Trust' }]);
+    expect(test.context().agentPrompts).toEqual([]);
+
+    // A prompt that is never answered goes when the agent reports: it has moved on.
+    test.send({ type: 'AGENT_NEEDS_YOU', key: 'r1/spec/1', ...trust });
+    test.agentEmit('r1/spec/1', { status: 'done', submission: { markdown: '# Spec v2', notes: [] } });
+    expect(test.context().agentPrompts).toEqual([]);
   });
 
   it('pauses in spec review and comes back to spec review', () => {

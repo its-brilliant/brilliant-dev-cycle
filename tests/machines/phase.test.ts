@@ -337,7 +337,7 @@ describe('phaseMachine', () => {
       },
     });
     await toQueuedForVerify(h);
-    expect(h.sent('PHASE_VERIFY_SLOT_REQUEST')).toHaveLength(1);
+    await h.until(() => h.sent('PHASE_VERIFY_SLOT_REQUEST').length === 1, 'the slot request');
 
     h.send({ type: 'VERIFY_SLOT_GRANTED', slot: 0 });
     await h.at('verifying');
@@ -351,6 +351,11 @@ describe('phaseMachine', () => {
     });
 
     await h.at('proving');
+    // What verification reported is kept, so the panel can show its steps and the verdict (§7.2).
+    expect(h.context().verificationResult).toEqual({
+      passed: true,
+      steps: [{ phase: 'check', name: 'unit', command: 'npm test', exitCode: 0, durationMs: 3, outputTail: 'ok' }],
+    });
     // bdc's own proof (the test report) is an item, made from what verification captured.
     expect(h.calls.checkProof[0]?.items).toEqual([
       { kind: 'tests', shows: 'the unit tests pass', file: 'report.json', by: 'bdc' },
@@ -360,7 +365,9 @@ describe('phaseMachine', () => {
     await h.at('done');
     expect(h.sent('PHASE_DONE')).toEqual([{ type: 'PHASE_DONE', phaseId: 'p1' }]);
     expect(h.calls.mergeBranch.at(-1)).toEqual({ into: '/repo/.worktrees/run', from: 'bdc/r1/p1' });
-    expect(h.closed.sort()).toEqual(['r1/p1/review-security-1', 'r1/p1/t1/builder', 'r1/p1/t2/builder']);
+    // The builders keep their sessions for fixes, so they are closed here; the reviewer closed
+    // its own terminal when it reported (§5.5), so CLOSE is not sent to a stopped actor.
+    expect(h.closed.sort()).toEqual(['r1/p1/t1/builder', 'r1/p1/t2/builder']);
   });
 
   it('a builder that does not finish sends the phase to the PM with a build blocker', async () => {
@@ -635,7 +642,7 @@ describe('phaseMachine', () => {
     h.send({ type: 'RESUME' });
     await h.tick(10);
     expect(h.state()).toBe('stopped');
-    expect(h.closed.sort()).toEqual(['r1/p1/review-security-1', 'r1/p1/t1/builder', 'r1/p1/t2/builder']);
+    expect(h.closed.sort()).toEqual(['r1/p1/t1/builder', 'r1/p1/t2/builder']);
   });
 
   it('fixes are bounded: with no attempt left the PM is asked again and no builder is touched', async () => {
@@ -679,6 +686,19 @@ describe('phaseMachine', () => {
     h.done('builder-t1');
     h.done('builder-t2');
     await h.at('reviewing');
+  });
+
+  it('closes only the children whose agent may still be up', async () => {
+    const h = harness();
+    await h.at('building');
+    await h.until(() => h.agentIds().length === 2, 'builders');
+    // One builder crashed: its agent closed its own terminal, so it is not closed again.
+    h.failed('builder-t1', 'the terminal exited');
+    await h.at('deciding');
+    h.send({ type: 'PM_DECISION', decision: { action: 'stop', reason: 'not worth it' } });
+    await h.at('stopped');
+    await h.until(() => h.closed.length === 1, 'the builder that is still up');
+    expect(h.closed).toEqual(['r1/p1/t2/builder']);
   });
 
   it('cancel closes every child and is final', async () => {
@@ -767,6 +787,46 @@ describe('phaseMachine persistence', () => {
     h.done('reviewer-security-1', { findings: [] });
     await h.at('queuedForVerify');
     expect(h.calls.mergeBranch).toHaveLength(merges);
+  });
+
+  it('restores in queuedForVerify by asking the run for a slot again', async () => {
+    const h = harness();
+    await toQueuedForVerify(h);
+    await h.until(() => h.sent('PHASE_VERIFY_SLOT_REQUEST').length === 1, 'the first slot request');
+
+    // The daemon died while the phase waited for a slot it had not been granted yet.
+    h.restore();
+    expect(h.state()).toBe('queuedForVerify');
+    await h.until(() => h.sent('PHASE_VERIFY_SLOT_REQUEST').length === 2, 'the request after the restore');
+
+    h.send({ type: 'VERIFY_SLOT_GRANTED', slot: 0 });
+    await h.at('done');
+    expect(h.sent('PHASE_DONE')).toEqual([{ type: 'PHASE_DONE', phaseId: 'p1' }]);
+  });
+
+  it('restores in resolving by sending the conflict instructions to the builder again', async () => {
+    let conflicted = false;
+    const h = harness({
+      merge: (merge) => {
+        if (!conflicted && merge.from === 'bdc/r1/p1/t2') {
+          conflicted = true;
+          return { merged: false, conflicts: ['src/b.ts'] };
+        }
+        return { merged: true, head: 'head' };
+      },
+    });
+    await toMerging(h);
+    await h.at('resolving');
+    await h.until(() => h.followUps.length === 1, 'the conflict follow-up');
+
+    h.restore();
+    expect(h.state()).toBe('resolving');
+    await h.until(() => h.followUps.length === 2, 'the follow-up after the restore');
+    expect(h.followUps[1]?.key).toBe('r1/p1/t2/builder');
+    expect(h.followUps[1]?.prompt).toContain('src/b.ts');
+
+    h.done('builder-t2');
+    await h.at('reviewing');
   });
 
   it('restores in awaitingYou without asking the PM again', async () => {

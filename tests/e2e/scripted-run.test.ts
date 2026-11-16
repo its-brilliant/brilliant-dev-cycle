@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectConfig } from '../../src/contracts/domain.js';
 import { connect, newRequestId, type DaemonClient } from '../../src/daemon/client.js';
 import { projectPaths } from '../../src/daemon/paths.js';
@@ -103,6 +103,15 @@ async function send(runId: string, event: Record<string, unknown>): Promise<void
   if (!response.ok) throw new Error(`the daemon refused ${String(event.type)}: ${response.error}`);
 }
 
+/** How many times the terminal of each launched job was closed (§5.5: once, and never twice). */
+function closesPerKey(): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const key of scriptedLaunches.byKey.keys()) {
+    counts[key] = scriptedCloses.filter((terminal) => terminal === `scripted-${key}`).length;
+  }
+  return counts;
+}
+
 /** The person's side of a run up to building: approve the spec and the plan as they appear. */
 async function approveToBuilding(runId: string, watcher: Watcher): Promise<void> {
   await watcher.stage('specReview');
@@ -121,6 +130,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   client?.close();
   client = undefined;
   await daemon?.stopDaemon();
@@ -135,6 +145,12 @@ describe('a scripted run, end to end', () => {
     'goes from a goal to a pull request through the daemon and the socket',
     { timeout: 10_000 },
     async () => {
+      // Every event a machine sends to a child that has already closed is a lost event: collect
+      // the warnings so the end of the run can prove none was sent (§5.5, §5.7).
+      const warnings: string[] = [];
+      vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+        warnings.push(args.map((arg) => String(arg)).join(' '));
+      });
       await startProject();
       const runId = requireRuns().create(GOAL, CONFIG);
       expect(runId).toMatch(/^r-/);
@@ -180,8 +196,18 @@ describe('a scripted run, end to end', () => {
       expect(scriptedCloses).toContain(`scripted-${runId}/plan/1`);
       // The person's messages reached the PM as turns, and its answers reached the run's chat.
       expect(scriptedSends.some((sent) => sent.text?.includes('The person says'))).toBe(true);
+      // The PM's very first request went into its session as a follow-up: it was not lost while the
+      // terminal was starting, and the scripted PM answered that turn, not its job prompt (§5.4).
+      const intakeTurn = scriptedSends.find((sent) => sent.text?.includes('grill-me intake'));
+      expect(intakeTurn?.terminal).toBe(`scripted-${runId}/pm`);
       const chat = done.chat as Array<{ from: string; text: string }>;
       expect(chat.filter((entry) => entry.from === 'pm').length).toBeGreaterThanOrEqual(1);
+      // CLOSE went only to sessions that were still up.
+      expect(warnings.filter((text) => text.includes('stopped actor'))).toEqual([]);
+      // Every terminal the run launched is closed exactly once, the PM's included (§5.5).
+      const closes = closesPerKey();
+      expect(Object.keys(closes).length).toBeGreaterThan(0);
+      for (const [key, count] of Object.entries(closes)) expect(count, key).toBe(1);
     },
   );
 
@@ -219,6 +245,25 @@ describe('a scripted run, end to end', () => {
       for (const [key, record] of scriptedLaunches.byKey) {
         expect(record.launches - record.reattached, key).toBeLessThanOrEqual(1);
       }
+    },
+  );
+
+  it(
+    'closes every terminal it launched when the person cancels the run',
+    { timeout: 10_000 },
+    async () => {
+      await startProject();
+      const runId = requireRuns().create(GOAL, CONFIG);
+      const watcher = await watch(runId);
+      await approveToBuilding(runId, watcher);
+      await send(runId, { type: 'CANCEL' });
+      const cancelled = await watcher.stage('cancelled');
+      expect(cancelled.error).toBeNull();
+
+      // A cancelled run leaves nothing behind: every launched job is closed exactly once (§5.5).
+      const closes = closesPerKey();
+      expect(closes[`${runId}/pm`]).toBe(1);
+      for (const [key, count] of Object.entries(closes)) expect(count, key).toBe(1);
     },
   );
 

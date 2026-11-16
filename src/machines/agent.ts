@@ -11,6 +11,12 @@
  * `job.key` instead of starting a second agent (§3.2); a later snapshot restores that launch and
  * `observeAgent` restarts on the terminal the context kept. No entry action runs twice, so no
  * `AGENT_RESULT` is reported twice.
+ *
+ * A `FOLLOW_UP` that arrives while `launching` is queued, not dropped: a parent that asks for a
+ * turn as soon as it has spawned this job (the PM's first request, §5.4) cannot know whether the
+ * terminal is up yet. The machine queues it here instead of making every parent wait for a
+ * readiness event, so there is no window in which a request can be lost, and the queue is part of
+ * the persisted context, so a restore of `launching` still sends it.
  */
 import { assign, fromCallback, fromPromise, sendParent, setup } from 'xstate';
 import type { DoneActorEvent, ErrorActorEvent } from 'xstate';
@@ -34,6 +40,12 @@ function nudgeText(job: AgentJob): string {
   return `You have not finished: bdc has no result from you. Call the ${SUBMIT_TOOLS[job.submit]} tool now with your result.`;
 }
 
+/** A paste that has not gone out yet: a follow-up's text, or a prompt choice's keys. */
+interface PendingSend {
+  text?: string;
+  keys?: string[];
+}
+
 /** Everything the machine knows about the job. Plain JSON: it is persisted (§5.7). */
 export interface AgentContext {
   job: AgentJob;
@@ -47,8 +59,8 @@ export interface AgentContext {
   sawAgentWorking: boolean;
   /** The one nudge of §5.5 has been sent. */
   nudged: boolean;
-  /** What `sending` hands to `sendToAgent`. */
-  pendingSend: SendToAgentInput | null;
+  /** What `sending` hands to `sendToAgent`, once there is a terminal to paste into. */
+  pendingSend: PendingSend | null;
   /** How the terminal ended, for the `crashed` detail. */
   exitCode: number | null;
   /** Why launching failed, for the `failed` detail. */
@@ -105,6 +117,8 @@ export const agentMachine = setup({
     settledWithoutSubmission: ({ context }) => context.sawAgentWorking && context.submission === null,
     nudged: ({ context }) => context.nudged,
     notKeepAlive: ({ context }) => !context.job.keepAlive,
+    /** A follow-up or a prompt choice is waiting for the terminal to be up (`launching` queues them). */
+    sendPending: ({ context }) => context.pendingSend !== null,
   },
   actions: {
     recordTerminal: assign({
@@ -130,14 +144,10 @@ export const agentMachine = setup({
     }),
     recordNudge: assign({ nudged: true }),
     recordFollowUp: assign(({ context, event }) =>
-      event.type === 'FOLLOW_UP'
-        ? { ...context, submission: null, pendingSend: { terminal: context.terminal, text: event.prompt } }
-        : context,
+      event.type === 'FOLLOW_UP' ? { ...context, submission: null, pendingSend: { text: event.prompt } } : context,
     ),
     recordPromptChoice: assign(({ context, event }) =>
-      event.type === 'PROMPT_CHOICE'
-        ? { ...context, pendingSend: { terminal: context.terminal, keys: [event.choice] } }
-        : context,
+      event.type === 'PROMPT_CHOICE' ? { ...context, pendingSend: { keys: [event.choice] } } : context,
     ),
     clearPendingSend: assign({ pendingSend: null }),
     reportDone: sendParent(({ context }): AgentToParent => ({
@@ -218,10 +228,18 @@ export const agentMachine = setup({
         src: 'launchAgent',
         id: 'launch',
         input: ({ context }): LaunchAgentInput => ({ job: context.job }),
-        onDone: { target: 'running', actions: 'recordTerminal' },
+        // A follow-up that arrived while `launching` goes out as soon as there is a terminal.
+        onDone: [
+          { guard: 'sendPending', target: '#agent.running.sending', actions: 'recordTerminal' },
+          { target: 'running', actions: 'recordTerminal' },
+        ],
         onError: { target: 'failed', actions: 'recordLaunchError' },
       },
-      on: { CLOSE: { target: 'closing' } },
+      on: {
+        CLOSE: { target: 'closing' },
+        // The terminal is not up yet, so the paste waits for `running` (see the file comment).
+        FOLLOW_UP: { actions: 'recordFollowUp' },
+      },
     },
     running: {
       // Restarts whenever `running` is re-entered (a nudge, a follow-up, a restore), so the
@@ -285,7 +303,7 @@ export const agentMachine = setup({
           invoke: {
             src: 'sendToAgent',
             id: 'send',
-            input: ({ context }): SendToAgentInput => context.pendingSend ?? { terminal: context.terminal },
+            input: ({ context }): SendToAgentInput => ({ terminal: context.terminal, ...context.pendingSend }),
             onDone: { target: 'active', actions: 'clearPendingSend' },
             // A failed paste does not kill the job: the observation rules still see what the
             // agent does next (and the empty grace or the role timeout still ends the job).
