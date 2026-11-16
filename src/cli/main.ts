@@ -1,0 +1,53 @@
+/**
+ * `bdc` entry point (spec §7.2). `main` parses argv, runs one command and answers with an exit
+ * code; it never calls `process.exit`, so tests drive it directly. `bin.ts` is the executable.
+ */
+import { USAGE, UsageError, runs, send, status, watch, type CliIO } from './commands.js';
+
+export type { CliIO } from './commands.js';
+export { USAGE } from './commands.js';
+
+export const defaultIO: CliIO = {
+  out: (text) => {
+    process.stdout.write(text);
+  },
+  err: (text) => {
+    process.stderr.write(text);
+  },
+};
+
+/** Exit codes: 0 did it, 1 the daemon or the run said no, 2 the command line was wrong. */
+export async function main(argv: string[], io: CliIO = defaultIO): Promise<number> {
+  const [command, ...args] = argv;
+  try {
+    switch (command) {
+      case 'send':
+        return await send(args);
+      case 'status':
+        return await status(args, io);
+      case 'runs':
+        return await runs(args, io);
+      case 'watch':
+        return await watch(args, io);
+      case 'help':
+      case '--help':
+      case '-h':
+        io.out(`${USAGE}\n`);
+        return 0;
+      default:
+        io.err(command === undefined ? `${USAGE}\n` : `bdc: unknown command: ${command}\n${USAGE}\n`);
+        return 2;
+    }
+  } catch (error) {
+    if (error instanceof UsageError) {
+      io.err(`bdc: ${error.message}\n`);
+      return 2;
+    }
+    io.err(`bdc: ${message(error)}\n`);
+    return 1;
+  }
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
