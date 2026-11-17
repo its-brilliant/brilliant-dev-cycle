@@ -66,7 +66,7 @@ interface Options {
   /** `hold` keeps the launch promise pending so the test can snapshot inside `launching`. */
   launch?: 'resolve' | 'hold' | 'reject';
   /** `hold` keeps `sendToAgent` pending (to snapshot inside `sending`); `reject` fails the paste. */
-  send?: 'hold' | 'reject';
+  send?: 'hold' | 'reject' | 'rejectFirst';
 }
 
 interface Observer {
@@ -151,6 +151,7 @@ function startAgent(job: AgentJob, options: Options = {}): Harness {
       sendToAgent: fromPromise<void, SendToAgentInput>(({ input }) => {
         sent.push(input);
         if (options.send === 'reject') return Promise.reject(new Error('the terminal is gone'));
+        if (options.send === 'rejectFirst' && sent.length === 1) return Promise.reject(new Error('hc send: the program is blocked'));
         if (options.send === 'hold') return new Promise<void>((resolve) => held.push(resolve));
         return Promise.resolve();
       }),
@@ -563,6 +564,38 @@ describe('agentMachine', () => {
     expect(harness.observers.at(-1)?.input.terminal).toBe(TERMINAL);
   });
 
+  /**
+   * Seen with a real claude on 17 Nov 2026: the PM's first request was queued during launch, claude
+   * opened on its folder trust prompt, `hc send` refused to paste into a blocked program, and the
+   * request was dropped while the prompt (reported during the send) was ignored: a deadlock.
+   */
+  it('holds a follow-up that a trust prompt blocks, shows the prompt, and delivers it once the prompt is answered', async () => {
+    const job = { ...jobFor(recordings[4]!), keepAlive: true };
+    const harness = startAgent(job, { launch: 'hold', send: 'rejectFirst' });
+    await flush();
+    harness.agent.send({ type: 'FOLLOW_UP', prompt: 'start the intake' });
+    harness.release();
+    await flush();
+    // The paste was refused; the request is held, not dropped.
+    expect(harness.sent).toEqual([{ terminal: TERMINAL, text: 'start the intake' }]);
+    expect(harness.agent.getSnapshot().context.heldText).toBe('start the intake');
+
+    harness.observe({ type: 'OBS_PROMPT', prompt: 'Do you trust the files in this folder?', choices: ["Don't trust it", 'Trust this folder'] });
+    await flush();
+    expect(harness.agent.getSnapshot().value).toEqual({ running: 'needsYou' });
+    expect(harness.received().filter((event) => event.type === 'AGENT_NEEDS_YOU')).toHaveLength(1);
+
+    harness.agent.send({ type: 'PROMPT_CHOICE', choice: 'Trust this folder' });
+    await flush();
+    expect(harness.sent.at(-1)).toEqual({ terminal: TERMINAL, keys: ['Trust this folder'] });
+
+    harness.observe({ type: 'OBS_PROMPT_CLEARED' });
+    await flush();
+    expect(harness.sent.at(-1)).toEqual({ terminal: TERMINAL, text: 'start the intake' });
+    expect(harness.agent.getSnapshot().context.heldText).toBeNull();
+    expect(harness.agent.getSnapshot().value).toEqual({ running: { active: 'working' } });
+  });
+
   describe('CLOSE', () => {
     interface CloseCase {
       state: string;
@@ -731,13 +764,15 @@ describe('agentMachine', () => {
     // purpose, so a transition that stops (or starts) handling an event has to change this table.
     const expected: Record<string, string[]> = {
       launching: ['CLOSE', 'FOLLOW_UP'],
-      running: ['CLOSE', 'OBS_EXITED'],
-      'running.active': ['CLOSE', 'OBS_ASKING', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_STATUS', 'OBS_SUBMITTED'],
-      'running.active.working': ['CLOSE', 'OBS_ASKING', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_STATUS', 'OBS_SUBMITTED'],
-      'running.active.settled': ['CLOSE', 'OBS_ASKING', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_STATUS', 'OBS_SUBMITTED'],
-      'running.sending': ['CLOSE', 'OBS_EXITED'],
-      'running.askingYou': ['CLOSE', 'OBS_ASK_DONE', 'OBS_EXITED'],
-      'running.needsYou': ['CLOSE', 'OBS_EXITED', 'OBS_PROMPT_CLEARED', 'PROMPT_CHOICE'],
+      // A prompt wins in every running state, a paste in flight included; a cleared prompt
+      // releases a held paste (17 Nov 2026 trust-prompt deadlock).
+      running: ['CLOSE', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED'],
+      'running.active': ['CLOSE', 'OBS_ASKING', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED', 'OBS_STATUS', 'OBS_SUBMITTED'],
+      'running.active.working': ['CLOSE', 'OBS_ASKING', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED', 'OBS_STATUS', 'OBS_SUBMITTED'],
+      'running.active.settled': ['CLOSE', 'OBS_ASKING', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED', 'OBS_STATUS', 'OBS_SUBMITTED'],
+      'running.sending': ['CLOSE', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED'],
+      'running.askingYou': ['CLOSE', 'OBS_ASK_DONE', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED'],
+      'running.needsYou': ['CLOSE', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED', 'PROMPT_CHOICE'],
       done: ['CLOSE', 'FOLLOW_UP'],
       empty: ['CLOSE'],
       crashed: [],

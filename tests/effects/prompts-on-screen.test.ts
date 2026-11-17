@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { detectPrompt } from '../../src/effects/prompts-on-screen.js';
 
-/** Screens are written from the strings claude and other CLIs show (no claude was run for them). */
+/** Screens are written from the strings claude and other CLIs show, except where a test says it was recorded. */
 const screen = (name: string): string => readFileSync(new URL(`../fixtures/screens/${name}`, import.meta.url), 'utf8');
 
 describe('detectPrompt', () => {
@@ -12,6 +12,17 @@ describe('detectPrompt', () => {
       choices: [
         { label: 'Trust this folder', keys: ['enter'] },
         { label: "Don't trust it", keys: ['down', 'enter'] },
+      ],
+    });
+  });
+
+  /** Recorded from a real claude 2.1.326 session that bdc v2 started on 17 Nov 2026. */
+  it('reads claude 2.1\'s unnumbered trust menu, where "No, exit" is first and has the cursor', () => {
+    expect(detectPrompt(screen('claude-2.1-trust-arrow.txt'))).toEqual({
+      prompt: 'Do you trust the files in this folder?',
+      choices: [
+        { label: "Don't trust it", keys: ['enter'] },
+        { label: 'Trust this folder', keys: ['down', 'enter'] },
       ],
     });
   });

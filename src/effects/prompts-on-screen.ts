@@ -41,6 +41,9 @@ const BORDER = /^[\s─━╭╮╰╯┌┐└┘╔╗╚╝]*$/;
 
 /** `1. Yes`, `❯ 2. No, exit`, `  3. No, and tell Claude what to do differently (esc)`. */
 const OPTION = /^\s*(?:[❯›>]\s*)?(\d+)\.\s+(\S.*)$/;
+/** claude 2.1's unnumbered menu: `❯ No, exit` with the cursor, `  Yes, I trust this folder` without. */
+const CURSOR_OPTION = /^(\s*)[❯›]\s+(\S.*)$/;
+const CURSOR = /^\s*[❯›>]/;
 
 interface PromptKind {
   /** One of these lines on screen means this CLI is asking this question. */
@@ -54,7 +57,8 @@ interface PromptKind {
 const TRUST: PromptKind = {
   markers: ['Do you trust the files in this folder', 'Quick safety check', 'Is this a project you created or one you trust'],
   question: 'Do you trust the files in this folder?',
-  label: (_option, index) => (index === 0 ? 'Trust this folder' : "Don't trust it"),
+  // By wording, not position: claude 2.1 lists "No, exit" first, and picking it ends the agent.
+  label: (option) => (/^(no\b|don't|do not)/i.test(option.trim()) ? "Don't trust it" : 'Trust this folder'),
 };
 
 const PERMISSION: PromptKind = {
@@ -91,12 +95,15 @@ interface OptionList {
   /** Index in `lines` of the first option. */
   start: number;
   texts: string[];
+  /** Which option the cursor is on now (0 when the screen shows no cursor). */
+  cursor: number;
 }
 
 /** A numbered list that ends the screen: the shape every one of these prompts has. */
 function optionList(lines: string[]): OptionList | null {
   let end = lines.length - 1;
   while (end >= 0 && lines[end] === '') end -= 1;
+  const lastText = end;
   // A CLI may print a hint under its options; the agent's own output is never that short.
   for (let hints = 0; end >= 0 && hints < MAX_HINTS && OPTION.exec(lines[end] ?? '') === null; hints += 1) {
     end -= 1;
@@ -110,10 +117,44 @@ function optionList(lines: string[]): OptionList | null {
     entries.unshift({ number: Number(match[1]), text: (match[2] ?? '').trim() });
     index -= 1;
   }
-  if (entries.length < 2 || entries.length > MAX_OPTIONS) return null;
+  if (entries.length < 2 || entries.length > MAX_OPTIONS) return cursorList(lines, lastText);
   // Numbered 1..n from the top: a stray "3." in the output above the prompt is not an option.
   if (entries.some((entry, position) => entry.number !== position + 1)) return null;
-  return { start: index + 1, texts: entries.map((entry) => entry.text) };
+  const start = index + 1;
+  const marked = lines.slice(start, start + entries.length).findIndex((line) => CURSOR.test(line));
+  return { start, texts: entries.map((entry) => entry.text), cursor: Math.max(marked, 0) };
+}
+
+/**
+ * claude 2.1's unnumbered menu near the bottom of the screen (`lastText` is the last line with text):
+ * a block of 2..MAX_OPTIONS lines where exactly one carries the cursor and the others are indented
+ * to the same text column, followed by at most MAX_HINTS hint lines.
+ */
+function cursorList(lines: string[], lastText: number): OptionList | null {
+  const lowest = Math.max(0, lastText - (MAX_OPTIONS + 2 * MAX_HINTS + 2));
+  let cursorAt = -1;
+  let column = -1;
+  for (let index = lastText; index >= lowest; index -= 1) {
+    const match = CURSOR_OPTION.exec(lines[index] ?? '');
+    if (match !== null) {
+      cursorAt = index;
+      column = (lines[index] ?? '').indexOf(match[2] ?? '');
+      break;
+    }
+  }
+  if (cursorAt < 0) return null;
+  const isOption = (line: string | undefined): boolean =>
+    line !== undefined && line.trim() !== '' && !CURSOR.test(line) && line.search(/\S/) === column;
+  let start = cursorAt;
+  while (start - 1 >= 0 && isOption(lines[start - 1])) start -= 1;
+  let last = cursorAt;
+  while (last + 1 <= lastText && isOption(lines[last + 1])) last += 1;
+  // Below the options only a short hint may follow (`Enter to confirm · Esc to cancel`).
+  const below = lines.slice(last + 1, lastText + 1).filter((line) => line.trim() !== '');
+  if (below.length > MAX_HINTS) return null;
+  const texts = lines.slice(start, last + 1).map((line) => line.replace(CURSOR, '').trim());
+  if (texts.length < 2 || texts.length > MAX_OPTIONS) return null;
+  return { start, texts, cursor: cursorAt - start };
 }
 
 /** The question right above the options, if it is one. */
@@ -126,9 +167,10 @@ function questionAbove(lines: string[], listStart: number): string | null {
   return null;
 }
 
-/** The first option is Enter, the second one Down then Enter, and so on. */
-function keysFor(index: number): string[] {
-  return [...Array<string>(index).fill('down'), 'enter'];
+/** From the cursor to the option, then Enter: on option 0 with the cursor on 0 that is just Enter. */
+function keysFor(index: number, cursor: number): string[] {
+  const moves = index - cursor;
+  return [...Array<string>(Math.abs(moves)).fill(moves > 0 ? 'down' : 'up'), 'enter'];
 }
 
 /**
@@ -152,7 +194,7 @@ export function detectPrompt(screen: string): DetectedPrompt | null {
     prompt,
     choices: list.texts.map((text, index) => ({
       label: kind === undefined ? ownWords(text) : kind.label(text, index),
-      keys: keysFor(index),
+      keys: keysFor(index, list.cursor),
     })),
   };
 }

@@ -33,6 +33,10 @@ import type {
 import type { AgentObservation, AgentToParent, ParentToAgent } from '../contracts/events.js';
 import type { Question } from '../contracts/domain.js';
 
+/** A held paste with no prompt to explain the refusal is tried again after this long, a few times. */
+const HELD_RETRY_MS = 3_000;
+const MAX_HELD_TRIES = 3;
+
 /** §3.3: an agent that settled without a result gets 20 s, then one nudge, then 20 s more. */
 const EMPTY_GRACE_MS = 20_000;
 
@@ -61,6 +65,13 @@ export interface AgentContext {
   nudged: boolean;
   /** What `sending` hands to `sendToAgent`, once there is a terminal to paste into. */
   pendingSend: PendingSend | null;
+  /**
+   * Text that could not be pasted yet: `hc send` refuses a program blocked on a prompt, so a
+   * follow-up or nudge waits here and goes in once the prompt is answered (never dropped).
+   */
+  heldText: string | null;
+  /** Retries of `heldText` when no prompt explains the refusal; bounded so it cannot loop. */
+  heldTries: number;
   /** How the terminal ended, for the `crashed` detail. */
   exitCode: number | null;
   /** Why launching failed, for the `failed` detail. */
@@ -97,6 +108,7 @@ export const agentMachine = setup({
   delays: {
     roleTimeout: ({ context }) => context.job.timeoutMs,
     emptyGrace: EMPTY_GRACE_MS,
+    heldRetry: HELD_RETRY_MS,
   },
   guards: {
     /** §3.3: the agent's own app says it is working. */
@@ -119,6 +131,8 @@ export const agentMachine = setup({
     notKeepAlive: ({ context }) => !context.job.keepAlive,
     /** A follow-up or a prompt choice is waiting for the terminal to be up (`launching` queues them). */
     sendPending: ({ context }) => context.pendingSend !== null,
+    hasHeldText: ({ context }) => context.heldText !== null,
+    canRetryHeld: ({ context }) => context.heldText !== null && context.heldTries < MAX_HELD_TRIES,
   },
   actions: {
     recordTerminal: assign({
@@ -150,6 +164,19 @@ export const agentMachine = setup({
       event.type === 'PROMPT_CHOICE' ? { ...context, pendingSend: { keys: [event.choice] } } : context,
     ),
     clearPendingSend: assign({ pendingSend: null }),
+    /** A paste that did not go in (refused, or interrupted by a prompt) is held, not dropped. */
+    holdUndelivered: assign(({ context }) => ({
+      ...context,
+      heldText: context.pendingSend?.text ?? context.heldText,
+      pendingSend: null,
+    })),
+    releaseHeld: assign(({ context }) => ({
+      ...context,
+      pendingSend: context.heldText === null ? null : { text: context.heldText },
+      heldText: null,
+      heldTries: context.heldTries + 1,
+    })),
+    resetHeldTries: assign({ heldTries: 0 }),
     reportDone: sendParent(({ context }): AgentToParent => ({
       type: 'AGENT_RESULT',
       key: context.job.key,
@@ -218,6 +245,8 @@ export const agentMachine = setup({
     sawAgentWorking: false,
     nudged: false,
     pendingSend: null,
+    heldText: null,
+    heldTries: 0,
     exitCode: null,
     launchError: null,
   }),
@@ -250,6 +279,12 @@ export const agentMachine = setup({
       },
       initial: 'active',
       on: {
+        // A prompt can appear in any running state, a paste in flight included; it always wins.
+        OBS_PROMPT: {
+          target: '.needsYou',
+          actions: ['holdUndelivered', { type: 'reportNeedsYou', params: ({ event }) => ({ prompt: event.prompt, choices: event.choices }) }],
+        },
+        OBS_PROMPT_CLEARED: [{ guard: 'hasHeldText', target: '.sending', actions: 'releaseHeld' }],
         // A result already accepted is still a result: the agent cannot work any more.
         OBS_EXITED: [
           { guard: 'submissionAccepted', target: 'done' },
@@ -261,7 +296,10 @@ export const agentMachine = setup({
         active: {
           initial: 'working',
           // The role timeout only runs while the agent is neither asking nor waiting for you.
-          after: { roleTimeout: { target: '#agent.timedOut' } },
+          after: {
+            roleTimeout: { target: '#agent.timedOut' },
+            heldRetry: { guard: 'canRetryHeld', target: 'sending', actions: 'releaseHeld' },
+          },
           on: {
             OBS_STATUS: [
               { guard: 'finishedOnStatus', target: '#agent.done', actions: 'recordAgentStatus' },
@@ -304,10 +342,10 @@ export const agentMachine = setup({
             src: 'sendToAgent',
             id: 'send',
             input: ({ context }): SendToAgentInput => ({ terminal: context.terminal, ...context.pendingSend }),
-            onDone: { target: 'active', actions: 'clearPendingSend' },
-            // A failed paste does not kill the job: the observation rules still see what the
-            // agent does next (and the empty grace or the role timeout still ends the job).
-            onError: { target: 'active', actions: 'clearPendingSend' },
+            onDone: { target: 'active', actions: ['clearPendingSend', 'resetHeldTries'] },
+            // A refused paste does not kill the job and is not lost: it is held, and goes in when
+            // the prompt that blocked it is answered, or on a bounded retry (see `heldRetry`).
+            onError: { target: 'active', actions: 'holdUndelivered' },
           },
         },
         askingYou: {
@@ -321,7 +359,10 @@ export const agentMachine = setup({
         needsYou: {
           on: {
             PROMPT_CHOICE: { target: 'sending', actions: 'recordPromptChoice' },
-            OBS_PROMPT_CLEARED: { target: 'active' },
+            OBS_PROMPT_CLEARED: [
+              { guard: 'hasHeldText', target: 'sending', actions: 'releaseHeld' },
+              { target: 'active' },
+            ],
           },
         },
       },

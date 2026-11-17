@@ -3,7 +3,7 @@
  * it restores, persists after every transition, logs every event, and projects the snapshot into
  * the view the panels render (spec §7.2). The machine and the projection come from the caller.
  */
-import { createActor, type Actor, type AnyStateMachine, type Snapshot, type SnapshotFrom, type Subscription } from 'xstate';
+import { createActor, type Actor, type AnyStateMachine, type InspectionEvent, type Snapshot, type SnapshotFrom, type Subscription } from 'xstate';
 import type { JsonValue, RunStore } from './store.js';
 
 /** Decides whether an event may reach the machine: returns the event to send, or the reason not to. */
@@ -35,6 +35,7 @@ export class RunHost {
   #subscription: Subscription | undefined;
   #view: JsonValue | undefined;
   #stopped = false;
+  #publishScheduled = false;
 
   constructor(options: RunHostOptions) {
     this.#machine = options.machine;
@@ -97,11 +98,26 @@ export class RunHost {
   }
 
   #createActor(): Actor<AnyStateMachine> {
+    // `subscribe` only sees the root's snapshot; a change inside a child (an agent leaving
+    // `launching`) must be persisted too, so every snapshot in the system schedules a publish.
+    const inspect = (event: InspectionEvent): void => {
+      if (event.type === '@xstate.snapshot') this.#schedulePublish();
+    };
     const stored = this.#store.readSnapshot();
-    if (!stored || 'incompatible' in stored) return createActor(this.#machine, { input: this.#input });
+    if (!stored || 'incompatible' in stored) return createActor(this.#machine, { input: this.#input, inspect });
     // machine.json is written by this class, so its `snapshot` is a persisted XState snapshot.
     // XState restores children recursively, does not re-run actions and restarts invocations.
-    return createActor(this.#machine, { snapshot: stored.snapshot as Snapshot<unknown>, input: this.#input });
+    return createActor(this.#machine, { snapshot: stored.snapshot as Snapshot<unknown>, input: this.#input, inspect });
+  }
+
+  /** One publish per burst of snapshots (a transition updates several actors at once). */
+  #schedulePublish(): void {
+    if (this.#publishScheduled) return;
+    this.#publishScheduled = true;
+    queueMicrotask(() => {
+      this.#publishScheduled = false;
+      this.#publish();
+    });
   }
 
   #publish(): void {
@@ -110,9 +126,13 @@ export class RunHost {
     const snapshot = actor.getSnapshot();
     // Snapshot first: a crash between the two writes must never leave a view ahead of the state.
     this.#store.writeSnapshot(actor.getPersistedSnapshot());
-    this.#view = this.#projectView(snapshot);
-    this.#store.writeView(this.#view);
-    for (const listener of this.#viewListeners) listener(this.#view);
+    const view = this.#projectView(snapshot);
+    // A change deep in a child (a terminal recorded) often leaves the view as it was: save the
+    // state every time, but only tell listeners when what the person would see changed.
+    if (this.#view !== undefined && JSON.stringify(view) === JSON.stringify(this.#view)) return;
+    this.#view = view;
+    this.#store.writeView(view);
+    for (const listener of this.#viewListeners) listener(view);
   }
 
   #projectView(snapshot: SnapshotFrom<AnyStateMachine>): JsonValue {
