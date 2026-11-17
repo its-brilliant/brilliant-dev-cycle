@@ -58,6 +58,9 @@ const GET_CONTEXT_DESCRIPTION =
   'The goal, spec, phase and task bdc wrote for this job, as markdown. Call it when the prompt in your terminal is ' +
   'not enough; it never ends your job.';
 
+/** The kinds a PM session can submit, in any order across its turns. */
+export const PM_KINDS: SubmitKind[] = ['brief', 'reply', 'decision'];
+
 /** The message an accepted submission answers with: the agent's turn is over, and it stays for follow-ups. */
 export const ACCEPTED = 'Submitted. You are done with this turn; wait for further instructions.';
 
@@ -67,24 +70,27 @@ export const ACCEPTED = 'Submitted. You are done with this turn; wait for furthe
  */
 export function createBdcServer(env: SubmitEnv): Server {
   const server = new Server({ name: MCP_SERVER_NAME, version: '2.0.0' }, { capabilities: { tools: {} } });
-  const submitToolName = SUBMIT_TOOLS[env.kind];
+  // The PM is one long-lived session (§5.4) whose turns end in different tools: the brief at intake,
+  // then replies and decisions. Every other job has exactly one tool.
+  const kinds: SubmitKind[] = PM_KINDS.includes(env.kind) ? PM_KINDS : [env.kind];
+  const toolKinds = new Map(kinds.map((kind) => [SUBMIT_TOOLS[kind], kind]));
+  const names = [...toolKinds.keys()].join(', ');
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: [submitTool(env.kind, submitToolName), contextTool()],
+    tools: [...kinds.map((kind) => submitTool(kind, SUBMIT_TOOLS[kind])), contextTool()],
   }));
 
   server.setRequestHandler(CallToolRequestSchema, (request) => {
     const name = request.params.name;
     if (name === GET_CONTEXT_TOOL) return Promise.resolve(text(contextText(env)));
-    if (name !== submitToolName) {
-      return Promise.resolve(
-        rejected(`bdc has no tool named ${name} for this job. Your tool is ${submitToolName}; use it to report.`),
-      );
+    const kind = toolKinds.get(name);
+    if (kind === undefined) {
+      return Promise.resolve(rejected(`bdc has no tool named ${name} for this job. Your tools are ${names}; use one to report.`));
     }
-    const result = submit(env, request.params.arguments ?? {});
+    const result = submit({ ...env, kind }, request.params.arguments ?? {});
     if (!result.ok) {
       const problems = result.problems.map((problem) => `- ${problem}`).join('\n');
-      return Promise.resolve(rejected(`bdc rejected the submission:\n${problems}\nFix it and call ${submitToolName} again.`));
+      return Promise.resolve(rejected(`bdc rejected the submission:\n${problems}\nFix it and call ${name} again.`));
     }
     return Promise.resolve(text(ACCEPTED));
   });

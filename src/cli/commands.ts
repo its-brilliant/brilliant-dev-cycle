@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { serveMcp } from '../agents/mcp-server.js';
+import { PM_KINDS, serveMcp } from '../agents/mcp-server.js';
 import { envFromProcess, isSubmitKind, submit as submitToInbox } from '../agents/submit.js';
 import { SUBMIT_TOOLS } from '../contracts/actors.js';
 import { ProjectConfig } from '../contracts/domain.js';
@@ -16,6 +16,7 @@ import { connect, ensureDaemon, newRequestId, type DaemonClient } from '../daemo
 import { latestRunId, projectPaths } from '../daemon/paths.js';
 import { ProjectRuns } from '../daemon/runs.js';
 import { startDaemon } from '../daemon/server.js';
+import { realEffects } from '../effects/real.js';
 import { scriptedActors } from '../effects/scripted.js';
 
 export interface CliIO {
@@ -30,7 +31,7 @@ export class UsageError extends Error {}
 
 export const USAGE = `usage:
   bdc start <dir> "<goal>"
-  bdc daemon <dir> [--scripted]
+  bdc daemon <dir> [--scripted]   (real agents unless --scripted)
   bdc send <dir> <EVENT_TYPE> [json-payload] [--run <id>]
   bdc status <dir> [--run <id>]
   bdc runs <dir>
@@ -135,24 +136,34 @@ export async function watch(args: string[], io: CliIO): Promise<number> {
  * the daemon as soon as anything looks at it.
  */
 export async function start(args: string[], io: CliIO): Promise<number> {
-  const { positional } = parseArgs(args, []);
+  const scripted = args.includes('--scripted');
+  const { positional } = parseArgs(args.filter((arg) => arg !== '--scripted'), []);
   if (positional.length !== 2) throw new UsageError('start takes a project directory and a goal');
   const root = path.resolve(requireDir(positional[0], 'start'));
   const goal = positional[1] ?? '';
   if (goal.trim() === '') throw new UsageError('start needs a goal, in quotes');
   const config = readProjectConfig(path.join(root, 'bdc.yaml'));
 
-  await ensureDaemon(root, () => spawnDaemon(root));
+  await ensureDaemon(root, () => spawnDaemon(root, scripted));
+  // Only the run's input is written here; the daemon starts it, so no agent is launched from this
+  // short-lived process (§7.1).
   const runs = new ProjectRuns(root, { effects: (input) => scriptedActors({ goal: input.goal }) });
+  const runId = runs.prepare(goal, config);
+  const client = await connect(root);
   try {
-    io.out(`${runs.create(goal, config)}\n`);
-    return 0;
+    const adopted = await client.request({ id: newRequestId(), type: 'view', runId });
+    if (!adopted.ok) throw new Error(`the daemon did not take run ${runId}: ${adopted.error ?? 'no answer'}`);
   } finally {
-    runs.stop();
+    client.close();
   }
+  io.out(`${runId}\n`);
+  return 0;
 }
 
-/** `bdc daemon <dir> --scripted`: the project's daemon, in the foreground, until Ctrl-C (§7.1). */
+/**
+ * `bdc daemon <dir> [--scripted]`: the project's daemon, in the foreground, until Ctrl-C (§7.1).
+ * Real agents by default; `--scripted` runs every agent as a deterministic stand-in.
+ */
 export async function daemon(args: string[], io: CliIO): Promise<number> {
   const positional: string[] = [];
   let scripted = false;
@@ -162,10 +173,11 @@ export async function daemon(args: string[], io: CliIO): Promise<number> {
     else positional.push(arg);
   }
   if (positional.length > 1) throw new UsageError('daemon takes one project directory');
-  if (!scripted) throw new UsageError('real agents come in slice 2; run `bdc daemon <dir> --scripted`');
   const root = path.resolve(positional[0] ?? '.');
 
-  const runs = new ProjectRuns(root, { effects: (input) => scriptedActors({ goal: input.goal }) });
+  const runs = new ProjectRuns(root, {
+    effects: (input) => (scripted ? scriptedActors({ goal: input.goal }) : realEffects(input)),
+  });
   const restored = runs.restoreAll();
   const server = await startDaemon({ root: runs.root, hostFor: (runId) => runs.hostFor(runId), runs: () => runs.runs() });
   const restoredNote = restored.length === 0 ? '' : `, restored ${restored.join(', ')}`;
@@ -203,12 +215,14 @@ export async function submit(args: string[], io: CliIO): Promise<number> {
     throw new UsageError('submit takes the payload as JSON or from --file, not both');
   }
   const env = envFromProcess();
-  // One tool per job: a submission of another kind would reach the job's observer as the wrong event.
-  if (env.kind !== kind) throw new Error(`this job submits ${env.kind}, not ${kind}`);
+  // A job submits its own kind; a PM session submits any of the PM's kinds (§5.4).
+  const allowed = PM_KINDS.includes(env.kind) ? PM_KINDS : [env.kind];
+  if (!allowed.includes(kind)) throw new Error(`this job submits ${allowed.join(' or ')}, not ${kind}`);
+  const target = { ...env, kind };
 
   const read = readSubmission(flags.file, positional[1], io);
   if (!read.ok) return 1;
-  const result = submitToInbox(env, read.payload);
+  const result = submitToInbox(target, read.payload);
   if (!result.ok) {
     io.err(`bdc: the submission was rejected:\n${result.problems.map((problem) => `  ${problem}`).join('\n')}\n`);
     return 1;
@@ -271,12 +285,12 @@ function cliBin(): string {
 }
 
 /** Start the daemon detached, its output in `.herd/daemon.log` (§7.1). A hidden hc terminal is slice 2. */
-function spawnDaemon(root: string): void {
+function spawnDaemon(root: string, scripted: boolean): void {
   const paths = projectPaths(root);
   fs.mkdirSync(paths.herd, { recursive: true });
   const log = fs.openSync(path.join(paths.herd, 'daemon.log'), 'a');
   try {
-    const child = spawn(process.execPath, [cliBin(), 'daemon', paths.root, '--scripted'], {
+    const child = spawn(process.execPath, [cliBin(), 'daemon', paths.root, ...(scripted ? ['--scripted'] : [])], {
       detached: true,
       stdio: ['ignore', log, log],
     });

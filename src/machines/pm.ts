@@ -99,7 +99,22 @@ const notProvided = (name: string): AnyActorLogic =>
 // ── Prompts (§4.1, §6): pure, so the shape of every turn is testable ────────────────────
 
 /** The intake turn: grill the person through `ask_user`, then `submit_brief` (§4.1). */
-export function intakePrompt(goal: string): string {
+/**
+ * Whether the question tool is attached to the PM (§3.4). It arrives in slice 3; until then the PM
+ * must not be told to call a tool it does not have.
+ */
+export const ASK_USER_AVAILABLE = false;
+
+export function intakePrompt(goal: string, askUser = ASK_USER_AVAILABLE): string {
+  if (!askUser) {
+    return [
+      `The person's goal: ${goal}`,
+      '',
+      'Look up what you need in the repo yourself. You cannot ask the person questions in this version of bdc,',
+      'so write the brief from the goal and the repo, and list every point you had to assume in `assumptions`',
+      '(the person reviews them with the spec). Then call `submit_brief` with { brief, decisions: [], assumptions[] }.',
+    ].join('\n');
+  }
   return [
     `The person's goal: ${goal}`,
     '',
@@ -118,9 +133,7 @@ export function messagePrompt(text: string): string {
     `The person says: ${text}`,
     '',
     'Answer in one or two sentences and call `reply` with { text }.',
-    'If the message asks for an action bdc can take, call `propose` with',
-    '{ proposalId, text, event } instead: `text` says what applying it does and `event` is the bdc event',
-    'that does it. The person applies or discards it; you do not apply it yourself.',
+    // `propose` (an action the person applies or discards, §4.7) has no submit tool yet.
   ].join('\n');
 }
 
@@ -165,8 +178,11 @@ export function primePrompt(input: { runId: string; goal: string; transcript: Tr
   const lines = [
     `You are the PM of bdc run ${input.runId}. The run's goal: ${input.goal}`,
     'You talk to the person, write the intake brief, answer their messages and decide on every blocked',
-    'phase. You never edit code. The bdc tools are attached to your session: `ask_user`, `submit_brief`,',
-    '`reply`, `propose`, `decide`.',
+    'phase. You never edit code.',
+    ASK_USER_AVAILABLE
+      ? 'The bdc tools are attached to your session: `ask_user`, `submit_brief`, `reply`, `decide`.'
+      : 'The bdc tools are attached to your session: `submit_brief`, `reply`, `decide`. You cannot ask the person questions yet.',
+    'Each request from bdc names the one tool that ends your turn; call it, then wait.',
   ];
   if (input.transcript.length > 0) {
     lines.push(

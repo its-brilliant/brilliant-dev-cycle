@@ -198,7 +198,7 @@ describe('a scripted run, end to end', () => {
       expect(scriptedSends.some((sent) => sent.text?.includes('The person says'))).toBe(true);
       // The PM's very first request went into its session as a follow-up: it was not lost while the
       // terminal was starting, and the scripted PM answered that turn, not its job prompt (§5.4).
-      const intakeTurn = scriptedSends.find((sent) => sent.text?.includes('grill-me intake'));
+      const intakeTurn = scriptedSends.find((sent) => sent.text?.includes("The person's goal:"));
       expect(intakeTurn?.terminal).toBe(`scripted-${runId}/pm`);
       const chat = done.chat as Array<{ from: string; text: string }>;
       expect(chat.filter((entry) => entry.from === 'pm').length).toBeGreaterThanOrEqual(1);

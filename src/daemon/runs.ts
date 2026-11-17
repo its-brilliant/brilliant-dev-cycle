@@ -45,14 +45,25 @@ export class ProjectRuns {
 
   /** Starts a new run from a goal and answers its id. */
   create(goal: string, config: ProjectConfig): string {
+    const runId = this.prepare(goal, config);
+    const input = this.#readInput(runId);
+    if (input === null) throw new Error(`run ${runId} was prepared but its input cannot be read`);
+    const host = this.#host(input);
+    this.#hosts.set(runId, host);
+    host.start();
+    return runId;
+  }
+
+  /**
+   * Write a new run's input without starting it. `bdc start` uses this so the run starts in the
+   * daemon only: starting it in the short-lived CLI process would launch real agents there.
+   */
+  prepare(goal: string, config: ProjectConfig): string {
     const runId = this.#newRunId();
     const input = this.#input(runId, goal, config);
     const files = this.#paths.run(runId);
     fs.mkdirSync(files.dir, { recursive: true });
     fs.writeFileSync(path.join(files.dir, INPUT_FILE), `${JSON.stringify(input)}\n`);
-    const host = this.#host(input);
-    this.#hosts.set(runId, host);
-    host.start();
     return runId;
   }
 

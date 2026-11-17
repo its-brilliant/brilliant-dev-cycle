@@ -140,10 +140,13 @@ function harness(steps: Step[] = []) {
 
 describe('pmMachine: prompts are pure and name the submit tool', () => {
   it('each kind names the tool the PM has to call', () => {
-    expect(intakePrompt(GOAL)).toContain('ask_user');
+    // Until the question tool is attached (slice 3) the PM is not told to call it.
+    expect(intakePrompt(GOAL)).not.toContain('ask_user');
     expect(intakePrompt(GOAL)).toContain('submit_brief');
+    expect(intakePrompt(GOAL, true)).toContain('ask_user');
+    expect(intakePrompt(GOAL, true)).toContain('submit_brief');
     expect(messagePrompt('why is p2 waiting?')).toContain('`reply`');
-    expect(messagePrompt('why is p2 waiting?')).toContain('`propose`');
+    expect(messagePrompt('why is p2 waiting?')).not.toContain('`propose`');
     const decide = decidePrompt({
       scope: 'p2',
       blocker: { kind: 'verify', summary: 'unit tests fail', evidence: ['1 failing'] },
@@ -208,7 +211,7 @@ describe('pmMachine', () => {
     expect(job.submit).toBe('brief');
     expect(job.prompt).toContain(GOAL);
     expect(test.state()).toBe('thinking');
-    expect(nth(test.script.prompts, 0)).toContain('ask_user');
+    expect(nth(test.script.prompts, 0)).toContain('submit_brief');
   });
 
   it('the brief goes to the run and the PM goes back to idle', () => {

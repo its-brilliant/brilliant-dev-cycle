@@ -69,9 +69,23 @@ describe('bdc mcp', () => {
     const { client, close } = await connect('decision');
     try {
       const { tools } = await client.listTools();
-      expect(tools[0]?.name).toBe(SUBMIT_TOOLS.decision);
-      expect(tools[0]?.inputSchema).toMatchObject({ type: 'object' });
-      expect(tools[0]?.inputSchema.oneOf).toBeDefined();
+      const decide = tools.find((tool) => tool.name === SUBMIT_TOOLS.decision);
+      expect(decide?.inputSchema).toMatchObject({ type: 'object' });
+      expect(decide?.inputSchema.oneOf).toBeDefined();
+    } finally {
+      await close();
+    }
+  });
+
+  it('a PM session gets its brief, reply and decide tools, and each call is filed under its own kind', async () => {
+    const { client, env, close } = await connect('brief');
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.map((tool) => tool.name).sort()).toEqual([SUBMIT_TOOLS.brief, SUBMIT_TOOLS.decision, SUBMIT_TOOLS.reply, GET_CONTEXT_TOOL].sort());
+      const result = await client.callTool({ name: SUBMIT_TOOLS.reply, arguments: { text: 'On it.' } });
+      expect(result.isError).toBeFalsy();
+      const lines = fs.readFileSync(inboxFile(agentDir(env.root, env.run, env.key)), 'utf8').trim().split('\n');
+      expect(JSON.parse(lines.at(-1) ?? '{}')).toMatchObject({ kind: 'reply', submission: { text: 'On it.' } });
     } finally {
       await close();
     }
