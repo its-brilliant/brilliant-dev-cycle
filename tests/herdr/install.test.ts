@@ -129,6 +129,41 @@ describe('install', () => {
     expect(JSON.parse(fs.readFileSync(path.join(home, 'layouts', 'bdc.json'), 'utf8'))).toMatchObject({ id: 'root', type: 'row' });
   });
 
+  it('ships the layout the UI needs: spaces, a stage-following main area and PM chat', () => {
+    install();
+    const layout = JSON.parse(fs.readFileSync(path.join(home, 'layouts', 'bdc.json'), 'utf8')) as {
+      type: string;
+      preview: string;
+      theme?: string;
+      colors?: Record<string, string>;
+      children: Array<{
+        id: string;
+        type?: string;
+        size?: { weight?: number; px?: number };
+        min?: number;
+        content?: { mod: string };
+        children?: Array<{ id: string; content: { mod: string } }>;
+      }>;
+    };
+
+    expect(layout.type).toBe('row');
+    // The look comes from settings.json: the layout forces no theme and no colors.
+    expect(layout.theme).toBeUndefined();
+    expect(layout.colors).toBeUndefined();
+    // Herdr's own spaces sidebar, then the stage-following main area, then PM chat.
+    expect(layout.children.map((child) => child.id)).toEqual(['sidebar', 'bdc-main', 'bdc-pm']);
+    expect(layout.children[0]?.type).toBe('column');
+    expect(layout.children[0]?.children?.map((child) => child.content.mod)).toEqual(['workspace-chrome', 'spaces']);
+    expect(layout.children[1]?.content?.mod).toBe('bdc-main');
+    expect(layout.children[1]?.size).toEqual({ weight: 1 });
+    expect(layout.children[2]?.content?.mod).toBe('bdc-pm');
+    expect(layout.children[2]?.size).toEqual({ px: 380 });
+    expect(layout.children[2]?.min).toBe(300);
+    // The picture settings shows for the layout, and the file it names.
+    expect(layout.preview).toBe('layouts/bdc.svg');
+    expect(fs.existsSync(path.join(home, 'layouts', 'bdc.svg'))).toBe(true);
+  });
+
   it('writes ~/.local/bin/bdc as a two-line wrapper that runs this checkout', () => {
     const result = install();
     const wrapper = path.join(personHome, '.local', 'bin', 'bdc');
