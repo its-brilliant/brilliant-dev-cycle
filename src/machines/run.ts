@@ -53,7 +53,7 @@ import {
 } from '../contracts/domain.js';
 import { PersonEvent, type AgentToParent, type PhaseToRun, type PmToRun } from '../contracts/events.js';
 import type { AgentJob } from '../contracts/actors.js';
-import { pmMachine, type PmInput } from './pm.js';
+import { answersInWords, pmMachine, type PmInput } from './pm.js';
 
 export interface RunInput {
   runId: string;
@@ -302,6 +302,13 @@ function outcomeDetail(outcome: AgentToParent extends never ? never : Extract<Ag
   return outcome.status === 'done' ? 'the agent submitted a result the run could not use' : `${outcome.status}: ${outcome.detail}`;
 }
 
+/** The question round in the chat (§3.4, §9.4): one entry, the titles the person was asked. */
+function questionsInChat(questions: Question[]): string {
+  const titles = questions.map((question) => question.title);
+  const [only] = titles;
+  return titles.length === 1 && only !== undefined ? only : `${titles.length} questions: ${titles.join(' | ')}`;
+}
+
 /**
  * The phase a job key belongs to, or `null` when the key is not one of a phase's agents. Every key
  * the run makes starts with the run id and then names the phase or the stage (§5.3, §4.2).
@@ -442,8 +449,9 @@ export const runMachine = setup({
     }),
   },
   guards: {
-    /** The PM asked the person something, so an answer has somewhere to go. */
-    hasAsking: ({ context }) => context.asking !== null,
+    /** The person answered the ask that is waiting; an answer to another ask is not this one (§3.4). */
+    answersAsking: ({ context, event }) =>
+      context.asking !== null && (event.type === 'ROUND_ANSWERED' || (event.type === 'ANSWER' && event.askId === context.asking.askId)),
     /** A change request needs an open comment or a note (§4.2). */
     specChangesNeeded: ({ context, event }) =>
       event.type === 'SPEC_CHANGES_REQUESTED' &&
@@ -494,9 +502,17 @@ export const runMachine = setup({
       if (event.type !== 'ROUND_ANSWERED' || context.asking === null) return;
       enqueue.sendTo('pm', { type: 'ANSWER', askId: context.asking.askId, answers: event.answers });
     }),
-    forwardAnswer: enqueueActions(({ event, enqueue }) => {
-      if (event.type !== 'ANSWER') return;
+    forwardAnswer: enqueueActions(({ context, event, enqueue }) => {
+      if (event.type !== 'ANSWER' || context.asking === null || context.asking.askId !== event.askId) return;
       enqueue.sendTo('pm', { type: 'ANSWER', askId: event.askId, answers: event.answers });
+    }),
+    /** What the person answered, in the chat, in their own words (§7.2). */
+    recordAnswers: assign({
+      chat: ({ context, event }) => {
+        if (event.type !== 'ROUND_ANSWERED' && event.type !== 'ANSWER') return context.chat;
+        if (context.asking === null) return context.chat;
+        return [...context.chat, { from: 'person', text: answersInWords(context.asking.questions, event.answers) }];
+      },
     }),
     skipQuestions: enqueueActions(({ enqueue }) => {
       enqueue.sendTo('pm', { type: 'MESSAGE', text: 'The person skipped the rest of the questions. Write the brief now with what you have and list what you assumed.' });
@@ -516,7 +532,11 @@ export const runMachine = setup({
     }),
     recordAsking: enqueueActions(({ context, event, enqueue }) => {
       if (event.type !== 'PM_ASKING') return;
-      enqueue.assign({ asking: { scope: event.scope, askId: event.askId, questions: event.questions } });
+      enqueue.assign({
+        asking: { scope: event.scope, askId: event.askId, questions: event.questions },
+        // The question round is part of the conversation the person sees (§3.4, §9.4).
+        chat: [...context.chat, { from: 'pm' as const, text: questionsInChat(event.questions) }],
+      });
       // A phase that raised the question waits for it (§5.3).
       if (event.scope !== null && context.phases[event.scope] === 'active') {
         enqueue.sendTo(phaseChildId(event.scope), { type: 'PM_ASKING' });
@@ -1035,6 +1055,10 @@ export const runMachine = setup({
     AGENT_NEEDS_YOU: { actions: 'recordAgentPrompt' },
     OVERRIDE: { actions: 'recordOverride' },
     PM_DECISION: { actions: 'recordDecision' },
+    // The person's answer to an ask (§3.4) belongs to the PM wherever the run is: the PM asks inside
+    // its own turn, at intake or on a blocked phase (§6). An answer to no ask is ignored.
+    ROUND_ANSWERED: [{ guard: 'answersAsking', actions: ['recordAnswers', 'forwardRoundAnswers'] }],
+    ANSWER: [{ guard: 'answersAsking', actions: ['recordAnswers', 'forwardAnswer'] }],
     PAUSE: { target: '#run.paused', actions: 'pauseChildren' },
     CANCEL: { target: '#run.cancelled' },
   },
@@ -1046,8 +1070,6 @@ export const runMachine = setup({
         intake: {
           entry: 'stageIntake',
           on: {
-            ROUND_ANSWERED: [{ guard: 'hasAsking', actions: 'forwardRoundAnswers' }],
-            ANSWER: { actions: 'forwardAnswer' },
             SKIP_QUESTIONS: { actions: 'skipQuestions' },
             UNDERSTANDING_CONFIRMED: { actions: 'confirmUnderstanding' },
             PM_BRIEF: { target: '#run.active.specDrafting', actions: 'storeBrief' },

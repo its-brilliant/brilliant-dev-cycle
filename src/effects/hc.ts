@@ -10,6 +10,10 @@
  * a terminal the observer last saw a prompt on, so `sendToAgent` can press the keys for the words
  * the person picked) and the delivered inbox sequence, which is a file, so a restarted observer
  * does not deliver a submission twice.
+ *
+ * The observer also carries the question tool (§3.4): `ask_user` appends to the job's
+ * `asks.jsonl` and the observer turns each new ask into one `OBS_ASKING`, counting what it already
+ * reported in `asks-reported` so a restart does not ask the person the same thing twice.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -26,6 +30,7 @@ import type {
 } from '../contracts/actors.js';
 import type { AgentObservation } from '../contracts/events.js';
 import { AGENT_ENV, agentDir, deliveredFile, inboxFile, InboxEntry } from '../contracts/inbox.js';
+import { askNumber, asksFile, readAsks, readReported, reportedFile, writeReported } from '../agents/asks.js';
 import { observationsFromHcEvents } from '../hc/observations.js';
 import { detectPrompt, type DetectedPrompt, type PromptChoice } from './prompts-on-screen.js';
 
@@ -227,8 +232,12 @@ export function hcEffects(options: HcEffectsOptions): HcEffects {
       const dir = agentDir(root, runId, job.key);
       const inbox = inboxFile(dir);
       const delivered = deliveredFile(dir);
-      // Read on start, not remembered: a restored observer must not deliver a submission twice.
+      const asks = asksFile(dir);
+      const reported = reportedFile(dir);
+      // Read on start, not remembered: a restored observer must not deliver a submission twice, nor
+      // report the same ask twice (§5.7).
       let highestDelivered = readDelivered(delivered);
+      let highestReported = readReported(reported);
       let prompt: DetectedPrompt | null = null;
       let exited = false;
       let stopped = false;
@@ -254,6 +263,22 @@ export function hcEffects(options: HcEffectsOptions): HcEffects {
             // The delivery is what matters; a lost seq costs one duplicate on a restore.
           }
         }
+      };
+
+      /** Every ask the question tool filed since the last report becomes one OBS_ASKING (§3.4). */
+      const deliverAsks = (): void => {
+        for (const entry of readAsks(asks)) {
+          const number = askNumber(entry.askId);
+          if (number <= highestReported) continue;
+          highestReported = number;
+          sendBack({ type: 'OBS_ASKING', askId: entry.askId, questions: entry.questions });
+          writeReported(reported, number);
+        }
+      };
+
+      const deliver = (): void => {
+        deliverInbox();
+        deliverAsks();
       };
 
       const feed = (line: string): void => {
@@ -315,7 +340,7 @@ export function hcEffects(options: HcEffectsOptions): HcEffects {
         if (stopped || reading) return;
         reading = true;
         try {
-          deliverInbox();
+          deliver();
           await readScreen();
         } finally {
           reading = false;
@@ -342,7 +367,7 @@ export function hcEffects(options: HcEffectsOptions): HcEffects {
 
       let watcher: fs.FSWatcher | null = null;
       try {
-        watcher = fs.watch(dir, () => deliverInbox());
+        watcher = fs.watch(dir, () => deliver());
         watcher.on('error', () => {
           watcher?.close();
           watcher = null;
@@ -352,7 +377,7 @@ export function hcEffects(options: HcEffectsOptions): HcEffects {
         watcher = null;
       }
 
-      deliverInbox();
+      deliver();
       const timer = setInterval(() => {
         void poll();
       }, pollMs);

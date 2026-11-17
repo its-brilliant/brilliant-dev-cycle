@@ -41,17 +41,18 @@ function standing(tool: string, asking: string): string[] {
 }
 
 const NO_ASKING =
-  'Do not ask the person anything: only the PM talks to them, and in this version it cannot ask either. Raise what ' +
-  'you need in your result instead.';
+  'Do not ask the person anything: only the PM talks to them. Raise what you need in your result instead.';
 const PM_ASKING =
-  'Do not ask the person anything: `ask_user` arrives in a later version. Decide, and record in `reason` what you ' +
-  'assumed.';
+  'You are the one role that talks to the person: ask them with `ask_user` (1 to 8 structured questions, each ' +
+  'with your recommended option). `ask_user` returns at once and ends your turn: call it alone, and their ' +
+  'answers arrive as your next message. Ask when it is the person\'s call; decide yourself when it is mechanical.';
 
 const ROLE_DUTIES: Record<Role, string[]> = {
   pm: [
     'You are the PM of a bdc run. You talk to the person, you write the intake brief from the goal, you answer their ' +
       'messages, and you decide on every blocked phase. You never edit code and never run the build.',
-    '- Grill the person on the goal until nothing is silently assumed; look facts up in the repo instead of asking.',
+    '- Grill the person in rounds through `ask_user` until nothing is silently assumed: look facts up in the repo ' +
+      'instead of asking, and recommend an answer to every question.',
     '- Decide yourself when the fix is mechanical and inside the spec.',
     '- A product decision, a risk you would accept on the person\'s behalf, or a change to the spec is the person\'s ' +
       'call, not yours.',

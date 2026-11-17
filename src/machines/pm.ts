@@ -6,11 +6,11 @@
  * picture. Everything said both ways is kept in `transcript`, which is what a restarted session is
  * primed with — the person sees one continuous conversation either way (§5.4).
  *
- * Answers do not go through this machine as prompts. The PM asks through the MCP `ask_user` call
- * (§3.4); the daemon resolves that call with the person's answer, so the answer arrives back inside
- * the PM's own session. A `RunToPm` `ANSWER` is therefore never queued for a turn: wherever it
- * arrives it is recorded in the transcript and `PM_ASK_DONE` tells the run the ask is done. The
- * agent's own `AGENT_ASK_DONE` (its `ask_user` call returned) reports the same thing.
+ * Answers do not go through this machine as prompts of their own. The PM asks through the MCP
+ * `ask_user` call (§3.4); the questions reach the run as `PM_ASKING` and the person's answer comes
+ * back as `ANSWER`, which this machine turns into the follow-up that carries the answers into the
+ * PM's own session — the turn that asked goes on with them. `PM_ASK_DONE` tells the run the ask is
+ * over. The agent's own `AGENT_ASK_DONE` (its `ask_user` call is done) reports the same thing.
  *
  * A turn is put into the session by an invoked actor, not by an entry action, so a restore of
  * `thinking` re-establishes it: XState restarts invocations and does not re-run entry actions
@@ -84,7 +84,8 @@ interface PmContext {
   turns: number;
   restarts: number;
   requests: number;
-  asking: { askId: string; scope: string | null } | null;
+  /** The ask the PM is waiting on, with the questions it asked, so the answer can be labelled (§3.4). */
+  asking: { askId: string; scope: string | null; questions: Question[] } | null;
   failure: string | null;
 }
 
@@ -100,10 +101,10 @@ const notProvided = (name: string): AnyActorLogic =>
 
 /** The intake turn: grill the person through `ask_user`, then `submit_brief` (§4.1). */
 /**
- * Whether the question tool is attached to the PM (§3.4). It arrives in slice 3; until then the PM
- * must not be told to call a tool it does not have.
+ * Whether the question tool is attached to the PM (§3.4). It is: the PM asks the person through
+ * `ask_user`, which returns at once and brings the answers back as the PM's next message.
  */
-export const ASK_USER_AVAILABLE = false;
+export const ASK_USER_AVAILABLE = true;
 
 export function intakePrompt(goal: string, askUser = ASK_USER_AVAILABLE): string {
   if (!askUser) {
@@ -118,12 +119,23 @@ export function intakePrompt(goal: string, askUser = ASK_USER_AVAILABLE): string
   return [
     `The person's goal: ${goal}`,
     '',
-    'Run the grill-me intake: map the goal as a design tree, look up what you can in the repo yourself,',
-    'and ask in rounds. Every round is one `ask_user` call with the questions you can ask now without',
-    'guessing at answers you have not heard, each with your recommended answer.',
-    'Never ask the person for something you can find in the repo. When nothing is left silently assumed,',
-    'ask one last `confirm` question about the shared understanding, then call `submit_brief` with',
-    '{ brief, decisions[], assumptions[] }.',
+    'Run the grill-me intake. Map the goal as a design tree: the decisions that shape the work, each one a',
+    'question whose answer changes what gets built. Then ask in rounds:',
+    '- A round is one `ask_user` call with the questions you can ask now without guessing at answers you have',
+    '  not heard yet. One to eight questions; every question carries your `recommended` option.',
+    '- Word each question so that accepting your recommendation is the easy path, and put why you recommend',
+    '  it in that option\'s `hint`.',
+    '- Find facts in the repo yourself: read the code, the README, `bdc.yaml` and the tests. Never ask the',
+    '  person something you can look up.',
+    '- An answer that opens a new branch is the next round\'s question. Keep asking round after round, as many',
+    '  as the goal needs, until nothing is left silently assumed.',
+    '- `ask_user` returns at once and ends your turn: call it alone, do not call another tool in that turn, and',
+    '  wait. The answers arrive as your next message.',
+    '',
+    'When the tree is settled, ask one last `confirm` question that states the shared understanding in a',
+    'sentence, so the person confirms or corrects it. Then call `submit_brief` with',
+    '{ brief, decisions: [{ question, answer }], assumptions[] }: `decisions` is what the person settled,',
+    '`assumptions` is what you decided without asking.',
   ].join('\n');
 }
 
@@ -171,6 +183,43 @@ export function answeredNote(askId: string, answers: Answer[]): string {
     .map((answer) => `${answer.questionId}: ${answer.skipped ? '(skipped)' : [...answer.picked, answer.text].filter(Boolean).join(', ')}`)
     .join('; ');
   return `The person answered ask ${askId}: ${said || '(nothing)'}.`;
+}
+
+/**
+ * One answer in the person's words: the labels of the options they picked, the text they typed, or
+ * that they left the decision to the PM (§3.4, §9.4).
+ */
+export function answerWords(question: Question | undefined, answer: Answer): string {
+  if (answer.skipped) return SKIPPED_ANSWER;
+  const labels = answer.picked.map((id) => question?.options.find((option) => option.id === id)?.label ?? id);
+  const typed = answer.text.trim();
+  if (labels.length > 0 && typed !== '') return `${labels.join(', ')} (${typed})`;
+  if (labels.length > 0) return labels.join(', ');
+  if (typed !== '') return typed;
+  return SKIPPED_ANSWER;
+}
+
+const SKIPPED_ANSWER = 'skipped (decide yourself and say so in assumptions)';
+
+/** The person's answers to a round, one line each, as the run's chat shows them (§7.2, §9.4). */
+export function answersInWords(questions: Question[], answers: Answer[]): string {
+  const lines = answers.map((answer) => {
+    const question = questions.find((candidate) => candidate.id === answer.questionId);
+    return `${question?.title ?? answer.questionId} → ${answerWords(question, answer)}`;
+  });
+  return lines.join('; ');
+}
+
+/**
+ * The follow-up that carries a round's answers into the PM's session (§3.4): the turn that asked
+ * goes on with them, one line per question, in the person's words rather than in option ids.
+ */
+export function answersPrompt(questions: Question[], answers: Answer[]): string {
+  const lines = answers.map((answer) => {
+    const question = questions.find((candidate) => candidate.id === answer.questionId);
+    return `- ${question?.title ?? answer.questionId} → ${answerWords(question, answer)}`;
+  });
+  return ['The person answered:', ...lines].join('\n');
 }
 
 /** The first prompt of a session, and the prompt a restarted session is primed with (§5.4). */
@@ -341,10 +390,15 @@ export const pmMachine = setup({
           : [...context.transcript, { from: 'run', text: requestPrompt(context.current) }],
     }),
     recordAnswer: assign({
-      transcript: ({ context, event }) =>
-        event.type === 'ANSWER'
-          ? [...context.transcript, { from: 'run', text: answeredNote(event.askId, event.answers) }]
-          : context.transcript,
+      transcript: ({ context, event }) => {
+        if (event.type !== 'ANSWER') return context.transcript;
+        const open = context.asking;
+        const text =
+          open !== null && open.askId === event.askId
+            ? answersPrompt(open.questions, event.answers)
+            : answeredNote(event.askId, event.answers);
+        return [...context.transcript, { from: 'run', text }];
+      },
     }),
     recordResult: assign({
       transcript: ({ context, event }) =>
@@ -355,7 +409,7 @@ export const pmMachine = setup({
     recordAsking: enqueueActions(({ context, event, enqueue }) => {
       if (event.type !== 'AGENT_ASKING') return;
       enqueue.assign({
-        asking: { askId: event.askId, scope: requestScope(context.current) },
+        asking: { askId: event.askId, scope: requestScope(context.current), questions: event.questions },
         transcript: [...context.transcript, { from: 'run', text: questionsNote(event.questions) }],
       });
     }),
@@ -388,10 +442,17 @@ export const pmMachine = setup({
       if (context.asking === null) return;
       enqueue.sendParent({ type: 'PM_ASK_DONE', askId: context.asking.askId });
     }),
-    /** The same, for an `ANSWER`: the daemon resolved that ask, so the card can go now. */
+    /** The answer arrived: it goes into the PM's session as the next message of the turn that asked. */
     sendAnswered: enqueueActions(({ context, event, enqueue }) => {
       if (event.type !== 'ANSWER') return;
-      enqueue.assign({ asking: context.asking?.askId === event.askId ? null : context.asking });
+      const open = context.asking;
+      // Only the ask this turn is waiting on is the turn's answer (§3.4); anything else is recorded.
+      if (open === null || open.askId !== event.askId || context.current === null) {
+        enqueue.sendParent({ type: 'PM_ASK_DONE', askId: event.askId });
+        return;
+      }
+      enqueue.sendTo(context.agentId, { type: 'FOLLOW_UP', prompt: answersPrompt(open.questions, event.answers) });
+      enqueue.assign({ asking: null });
       enqueue.sendParent({ type: 'PM_ASK_DONE', askId: event.askId });
     }),
     sendFailedToRun: enqueueActions(({ context, enqueue }) => {

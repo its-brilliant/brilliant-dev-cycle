@@ -1,9 +1,11 @@
 /**
  * `bdc mcp`: the MCP server an agent talks to (spec §3.4). It is scoped to one job by the AGENT_ENV
- * bdc starts the agent with, and it exposes exactly two tools:
+ * bdc starts the agent with, and it exposes:
  *
  * - the job's submit tool (name from SUBMIT_TOOLS, input schema from SUBMISSIONS for the job's kind),
  *   which validates the result through `submit` and ends the agent's turn;
+ * - `ask_user` for a PM job, the question tool: it files the questions for the person and returns at
+ *   once, so the PM ends its turn and the answers arrive as its next message (§3.4);
  * - `get_context`, which hands the agent the context file bdc wrote for the job.
  *
  * Why the low-level `Server` and not `McpServer`: `McpServer.registerTool` validates the arguments
@@ -21,11 +23,14 @@ import { CallToolRequestSchema, ListToolsRequestSchema, type Tool } from '@model
 import { z } from 'zod';
 import { SUBMIT_TOOLS, type SubmitKind } from '../contracts/actors.js';
 import { SUBMISSIONS, agentDir } from '../contracts/inbox.js';
+import { ASK_INPUT, ask } from './asks.js';
 import { submit, type SubmitEnv } from './submit.js';
 
 export const MCP_SERVER_NAME = 'bdc';
 
 export const GET_CONTEXT_TOOL = 'get_context';
+
+export const ASK_USER_TOOL = 'ask_user';
 
 /** What the agent must pass to the submit tool of each kind, and that this call ends its turn. */
 const SUBMIT_DESCRIPTIONS: Record<SubmitKind, string> = {
@@ -65,6 +70,18 @@ export const PM_KINDS: SubmitKind[] = ['brief', 'reply', 'decision'];
 export const ACCEPTED = 'Submitted. You are done with this turn; wait for further instructions.';
 
 /**
+ * The message an accepted `ask_user` call answers with. It is not a blocking call (§3.4): the
+ * questions are with the person, the PM's turn is over, and the answers come back as a follow-up.
+ */
+export const ASKED = 'Your questions are with the person. End your turn now: do not call any other tool. Their answers arrive as your next message.';
+
+const ASK_USER_DESCRIPTION =
+  'Ask the person 1 to 8 structured questions: { questions: [{ id, title, body, kind: "single" | "multi" | "text" | ' +
+  '"confirm", options: [{ id, label, hint? }], recommended, allowOther }] }. Each question needs a `recommended` ' +
+  'option, and is worded so that accepting it is the easy path. This returns at once: end your turn with this ' +
+  'call, and their answers arrive as your next message.';
+
+/**
  * The MCP server for one job. Call `connect` with a transport: `serveMcp` does it over stdio, and the
  * tests use the SDK's in-memory pair.
  */
@@ -72,17 +89,27 @@ export function createBdcServer(env: SubmitEnv): Server {
   const server = new Server({ name: MCP_SERVER_NAME, version: '2.0.0' }, { capabilities: { tools: {} } });
   // The PM is one long-lived session (§5.4) whose turns end in different tools: the brief at intake,
   // then replies and decisions. Every other job has exactly one tool.
-  const kinds: SubmitKind[] = PM_KINDS.includes(env.kind) ? PM_KINDS : [env.kind];
+  const isPm = PM_KINDS.includes(env.kind);
+  const kinds: SubmitKind[] = isPm ? PM_KINDS : [env.kind];
   const toolKinds = new Map(kinds.map((kind) => [SUBMIT_TOOLS[kind], kind]));
-  const names = [...toolKinds.keys()].join(', ');
+  const names = [...toolKinds.keys(), ...(isPm ? [ASK_USER_TOOL] : [])].join(', ');
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: [...kinds.map((kind) => submitTool(kind, SUBMIT_TOOLS[kind])), contextTool()],
+    tools: [...kinds.map((kind) => submitTool(kind, SUBMIT_TOOLS[kind])), ...(isPm ? [askUserTool()] : []), contextTool()],
   }));
 
   server.setRequestHandler(CallToolRequestSchema, (request) => {
     const name = request.params.name;
     if (name === GET_CONTEXT_TOOL) return Promise.resolve(text(contextText(env)));
+    // §3.4: only the PM asks the person, and the call is answered at once, not when they answer.
+    if (name === ASK_USER_TOOL && isPm) {
+      const result = ask(env, request.params.arguments ?? {});
+      if (!result.ok) {
+        const problems = result.problems.map((problem) => `- ${problem}`).join('\n');
+        return Promise.resolve(rejected(`bdc rejected the questions:\n${problems}\nFix them and call ${name} again.`));
+      }
+      return Promise.resolve(text(ASKED));
+    }
     const kind = toolKinds.get(name);
     if (kind === undefined) {
       return Promise.resolve(rejected(`bdc has no tool named ${name} for this job. Your tools are ${names}; use one to report.`));
@@ -94,11 +121,6 @@ export function createBdcServer(env: SubmitEnv): Server {
     }
     return Promise.resolve(text(ACCEPTED));
   });
-
-  // ── ask_user (slice 3, spec §3.4) ───────────────────────────────────────────────────
-  // The PM's question tool: `ask_user({ questions })` blocks until the person answers in the UI and
-  // returns their answers. It needs the run's UI to carry a question out and an answer back, which
-  // is slice 3. Until then the PM does not get this tool, and its system prompt says it may not ask.
 
   return server;
 }
@@ -116,6 +138,10 @@ function submitTool(kind: SubmitKind, name: string): Tool {
 
 function contextTool(): Tool {
   return { name: GET_CONTEXT_TOOL, description: GET_CONTEXT_DESCRIPTION, inputSchema: { type: 'object', properties: {} } };
+}
+
+function askUserTool(): Tool {
+  return { name: ASK_USER_TOOL, description: ASK_USER_DESCRIPTION, inputSchema: inputSchemaOf(ASK_INPUT) };
 }
 
 /**

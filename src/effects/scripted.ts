@@ -34,7 +34,7 @@ import type {
   SendToAgentInput,
   SubmitKind,
 } from '../contracts/actors.js';
-import type { Brief, Decision, Finding, Plan } from '../contracts/domain.js';
+import type { Brief, Decision, Finding, Plan, Question } from '../contracts/domain.js';
 import type { AgentObservation } from '../contracts/events.js';
 import type { AgentJob } from '../contracts/actors.js';
 import type { OpenPullRequestInput, OpenPullRequestOutput } from '../machines/run.js';
@@ -98,6 +98,28 @@ export function scriptedPlan(): Plan {
   };
 }
 
+/**
+ * The one question the scripted PM asks at intake (§4.1): a `single` choice with a recommended
+ * option, so a whole scripted run exercises the question tool the way a person would see it.
+ */
+export function scriptedIntakeQuestion(): Question {
+  return {
+    id: 'q-scope',
+    title: 'How far should this go?',
+    body: 'bdc needs the shape of the work before it writes the spec.',
+    kind: 'single',
+    options: [
+      { id: 'smallest', label: 'The smallest change that works', hint: 'quickest to review and to ship' },
+      { id: 'full', label: 'The full feature, end to end', hint: 'more work, more to review' },
+    ],
+    recommended: 'smallest',
+    allowOther: true,
+  };
+}
+
+/** The ask id the scripted PM files its question under: one ask per scripted job. */
+export const SCRIPTED_ASK_ID = 'ask-1';
+
 /** What a scripted submit tool accepts: one artifact shape per submit kind (§3.4). */
 type ScriptedSubmission =
   | Brief
@@ -152,6 +174,8 @@ function pmSubmitKind(terminal: string): SubmitKind | null {
   const prompt = sentText.get(terminal);
   if (prompt === undefined) return null;
   if (prompt.includes('Call `decide`')) return 'decision';
+  // The scripted PM asks only at intake, so the answers it gets are the intake's: it writes the brief.
+  if (prompt.includes('The person answered:')) return 'brief';
   if (prompt.includes('`submit_brief`')) return 'brief';
   if (prompt.includes('`reply`')) return 'reply';
   return null;
@@ -161,13 +185,34 @@ function pmSubmitKind(terminal: string): SubmitKind | null {
  * One agent's life, as the observer reports it: launched, working, submitted, idle (§3.3, §5.5).
  * Thunks, because the submission is read when it is emitted: the follow-up that asks for it is
  * pasted into the terminal after this observer starts.
+ *
+ * A step answers `null` when it is not time for it yet (it is asked again on the next tick) and
+ * `'skip'` when it does not apply to this turn. The PM's intake turn is where both happen: it asks
+ * the person first and waits, because `ask_user` is not a blocking call (§3.4) — its turn ends on
+ * the ask, and the answers come back as the follow-up that carries on the turn.
  */
-function observationsFor(job: AgentJob, terminal: string, options: ScriptedOptions): Array<() => AgentObservation> {
+type ScriptedStep = () => AgentObservation | 'skip' | null;
+
+/** The PM's intake turn, as opposed to a later message or decision turn (§5.4). */
+function intakeTurn(terminal: string): boolean {
+  return (sentText.get(terminal) ?? '').includes("The person's goal:");
+}
+
+/** The answers to the ask came back as the turn's next message (§3.4). */
+function answeredTurn(terminal: string): boolean {
+  return (sentText.get(terminal) ?? '').includes('The person answered:');
+}
+
+function observationsFor(job: AgentJob, terminal: string, options: ScriptedOptions): ScriptedStep[] {
   const app = job.agent.cli;
+  const submit = (): AgentObservation => ({ type: 'OBS_SUBMITTED', submission: submissionFor(job, terminal, options) });
   return [
-    () => ({ type: 'OBS_STATUS', app: 'bdc', state: 'working' }),
+    // A PM job's turn is a follow-up pasted in after the observer attaches: wait for it.
+    () => (job.role === 'pm' && sentText.get(terminal) === undefined ? null : { type: 'OBS_STATUS', app: 'bdc', state: 'working' }),
     () => ({ type: 'OBS_STATUS', app, state: 'working' }),
-    () => ({ type: 'OBS_SUBMITTED', submission: submissionFor(job, terminal, options) }),
+    () => (intakeTurn(terminal) ? { type: 'OBS_ASKING', askId: SCRIPTED_ASK_ID, questions: [scriptedIntakeQuestion()] } : 'skip'),
+    () => (intakeTurn(terminal) && !answeredTurn(terminal) ? null : 'skip'),
+    submit,
     () => ({ type: 'OBS_STATUS', app, state: 'idle' }),
   ];
 }
@@ -210,9 +255,14 @@ export function scriptedActors(options: ScriptedOptions = {}): WiredEffects {
       const tick = (): void => {
         if (stopped) return;
         const next = observations[index];
-        index += 1;
         if (next === undefined) return;
-        sendBack(next());
+        const observation = next();
+        if (observation === null) {
+          timers.add(setTimeout(tick, delayMs));
+          return;
+        }
+        index += 1;
+        if (observation !== 'skip') sendBack(observation);
         if (index < observations.length) timers.add(setTimeout(tick, delayMs));
       };
       timers.add(setTimeout(tick, delayMs));

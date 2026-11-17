@@ -72,6 +72,13 @@ export interface AgentContext {
   heldText: string | null;
   /** Retries of `heldText` when no prompt explains the refusal; bounded so it cannot loop. */
   heldTries: number;
+  /** The ask the agent is waiting on, while it is in `askingYou` (§3.4). */
+  askId: string | null;
+  /**
+   * Asks the person already answered, by id. A restarted observer may report the same ask again
+   * (§5.7); the answer is not asked for twice.
+   */
+  answeredAsks: string[];
   /** How the terminal ended, for the `crashed` detail. */
   exitCode: number | null;
   /** Why launching failed, for the `failed` detail. */
@@ -129,6 +136,8 @@ export const agentMachine = setup({
     settledWithoutSubmission: ({ context }) => context.sawAgentWorking && context.submission === null,
     nudged: ({ context }) => context.nudged,
     notKeepAlive: ({ context }) => !context.job.keepAlive,
+    /** An ask that was already answered is not put to the person again (§3.4, §5.7). */
+    askAnswered: ({ context, event }) => event.type === 'OBS_ASKING' && context.answeredAsks.includes(event.askId),
     /** A follow-up or a prompt choice is waiting for the terminal to be up (`launching` queues them). */
     sendPending: ({ context }) => context.pendingSend !== null,
     hasHeldText: ({ context }) => context.heldText !== null,
@@ -157,6 +166,17 @@ export const agentMachine = setup({
       exitCode: ({ event }) => (event.type === 'OBS_EXITED' ? event.code : null),
     }),
     recordNudge: assign({ nudged: true }),
+    recordAsk: assign({
+      askId: ({ event }) => (event.type === 'OBS_ASKING' ? event.askId : null),
+    }),
+    /** The ask is over: the answer came back (a FOLLOW_UP) or the daemon resolved the call. */
+    markAskAnswered: assign({
+      answeredAsks: ({ context }) =>
+        context.askId === null || context.answeredAsks.includes(context.askId)
+          ? context.answeredAsks
+          : [...context.answeredAsks, context.askId],
+      askId: null,
+    }),
     recordFollowUp: assign(({ context, event }) =>
       event.type === 'FOLLOW_UP' ? { ...context, submission: null, pendingSend: { text: event.prompt } } : context,
     ),
@@ -247,6 +267,8 @@ export const agentMachine = setup({
     pendingSend: null,
     heldText: null,
     heldTries: 0,
+    askId: null,
+    answeredAsks: [],
     exitCode: null,
     launchError: null,
   }),
@@ -311,13 +333,16 @@ export const agentMachine = setup({
               { guard: 'agentNotWorking', target: '#agent.done', actions: 'recordSubmission' },
               { actions: 'recordSubmission' },
             ],
-            OBS_ASKING: {
-              target: 'askingYou',
-              actions: {
-                type: 'reportAsking',
-                params: ({ event }) => ({ askId: event.askId, questions: event.questions }),
+            OBS_ASKING: [
+              { guard: 'askAnswered' },
+              {
+                target: 'askingYou',
+                actions: [
+                  'recordAsk',
+                  { type: 'reportAsking', params: ({ event }) => ({ askId: event.askId, questions: event.questions }) },
+                ],
               },
-            },
+            ],
             OBS_PROMPT: {
               target: 'needsYou',
               actions: { type: 'reportNeedsYou', params: ({ event }) => ({ prompt: event.prompt, choices: event.choices }) },
@@ -350,9 +375,22 @@ export const agentMachine = setup({
         },
         askingYou: {
           on: {
+            /**
+             * The answers are pasted as the agent's next message (§3.4): the ask is answered, the
+             * parent's question card can go, and the agent works again with them.
+             */
+            FOLLOW_UP: {
+              target: 'sending',
+              actions: [
+                'recordFollowUp',
+                // The parent hears the ask is done while the context still names it.
+                { type: 'reportAskDone', params: ({ context }) => ({ askId: context.askId ?? '' }) },
+                'markAskAnswered',
+              ],
+            },
             OBS_ASK_DONE: {
               target: 'active',
-              actions: { type: 'reportAskDone', params: ({ event }) => ({ askId: event.askId }) },
+              actions: [{ type: 'reportAskDone', params: ({ event }) => ({ askId: event.askId }) }, 'markAskAnswered'],
             },
           },
         },
