@@ -41,6 +41,26 @@ function stageIs(stage: string) {
   return (snapshot: RunSnapshot): boolean => projectRun(snapshot).stage === stage;
 }
 
+/**
+ * The person's side of intake (§4.1): the scripted PM asks one question through the question tool,
+ * the person answers it, and the PM writes the brief from the answer.
+ */
+async function toSpecReview(actor: Actor): Promise<RunSnapshot> {
+  const asked = await nextWhere(actor, (snapshot) => projectRun(snapshot).asking !== null, 'the PM to ask about the goal');
+  const question = projectRun(asked).asking?.questions[0];
+  if (question === undefined) throw new Error('the PM asked nothing');
+  const answers = [
+    {
+      questionId: question.id,
+      picked: question.recommended === undefined ? [] : [question.recommended],
+      text: '',
+      skipped: false,
+    },
+  ];
+  actor.send({ type: 'ROUND_ANSWERED', answers });
+  return nextWhere(actor, stageIs('specReview'), 'spec review');
+}
+
 /** Every people-facing string in a view: they must not read like code (§9.1 rule 4). */
 function words(view: RunViewType): string[] {
   return [view.stageWords, ...view.phases.map((phase) => phase.words)];
@@ -86,7 +106,7 @@ describe('projectRun', () => {
     actor = createActor(wiredRunMachine(scriptedActors({ goal: INPUT.goal })), { input: INPUT });
     actor.start();
 
-    const specReview = await nextWhere(actor, stageIs('specReview'), 'spec review');
+    const specReview = await toSpecReview(actor);
     const specView = projectRun(specReview);
     expect(RunView.safeParse(specView).success).toBe(true);
     expect(specView.stageWords).toBe('Spec ready for you');
@@ -131,7 +151,7 @@ describe('projectRun', () => {
     actor = createActor(wiredRunMachine(scriptedActors({ goal: INPUT.goal })), { input: INPUT });
     actor.start();
 
-    const specReview = await nextWhere(actor, stageIs('specReview'), 'spec review');
+    const specReview = await toSpecReview(actor);
     actor.send({ type: 'PAUSE' });
     const paused = await nextWhere(actor, (snapshot) => projectRun(snapshot).paused, 'pause');
     const view = projectRun(paused);
@@ -147,7 +167,7 @@ describe('projectRun', () => {
     actor = createActor(wiredRunMachine(scriptedActors({ goal: INPUT.goal })), { input: INPUT });
     actor.start();
 
-    await nextWhere(actor, stageIs('specReview'), 'spec review');
+    await toSpecReview(actor);
     actor.send({ type: 'SPEC_APPROVED' });
     await nextWhere(actor, stageIs('planReview'), 'plan review');
     actor.send({ type: 'PLAN_APPROVED' });
@@ -187,11 +207,39 @@ describe('projectRun', () => {
     expect(projectRun(actor.getSnapshot() as RunSnapshot).asking).toBeNull();
   });
 
+  it('shows the question round and the answers in the chat, as a conversation (§9.4)', { timeout: 10_000 }, async () => {
+    actor = createActor(wiredRunMachine(scriptedActors({ goal: INPUT.goal })), { input: INPUT });
+    actor.start();
+
+    const asked = await nextWhere(actor, (snapshot) => projectRun(snapshot).asking !== null, 'the PM to ask about the goal');
+    const view = projectRun(asked);
+    expect(RunView.safeParse(view).success).toBe(true);
+    const question = view.asking?.questions[0];
+    if (question === undefined) throw new Error('the PM asked nothing');
+    expect(view.chat).toEqual([{ from: 'pm', text: question.title }]);
+    expect(view.needsYou).toBe(true);
+
+    actor.send({
+      type: 'ROUND_ANSWERED',
+      answers: [{ questionId: question.id, picked: [question.recommended ?? ''], text: '', skipped: false }],
+    });
+    const answered = await nextWhere(
+      actor,
+      (snapshot) => projectRun(snapshot).chat.some((entry) => entry.from === 'you'),
+      'the answer in the chat',
+    );
+    const label = question.options.find((option) => option.id === question.recommended)?.label;
+    expect(projectRun(answered).chat).toEqual([
+      { from: 'pm', text: question.title },
+      { from: 'you', text: `${question.title} → ${label}` },
+    ]);
+  });
+
   it('shows an agent prompt as a card and stops waiting on the person when it is answered', { timeout: 10_000 }, async () => {
     actor = createActor(wiredRunMachine(scriptedActors({ goal: INPUT.goal })), { input: INPUT });
     actor.start();
 
-    await nextWhere(actor, stageIs('specReview'), 'spec review');
+    await toSpecReview(actor);
     actor.send({ type: 'SPEC_APPROVED' });
     await nextWhere(actor, stageIs('planReview'), 'plan review');
     actor.send({ type: 'PLAN_APPROVED' });
@@ -231,7 +279,7 @@ describe('projectRun', () => {
     );
     actor.start();
 
-    await nextWhere(actor, stageIs('specReview'), 'spec review');
+    await toSpecReview(actor);
     actor.send({ type: 'SPEC_APPROVED' });
     await nextWhere(actor, stageIs('planReview'), 'plan review');
     actor.send({ type: 'PLAN_APPROVED' });
@@ -256,7 +304,7 @@ describe('projectRun', () => {
     actor = createActor(wiredRunMachine(scriptedActors({ goal: INPUT.goal })), { input });
     actor.start();
 
-    await nextWhere(actor, stageIs('specReview'), 'spec review');
+    await toSpecReview(actor);
     actor.send({ type: 'SPEC_APPROVED' });
     await nextWhere(actor, stageIs('planReview'), 'plan review');
     actor.send({ type: 'PLAN_APPROVED' });
@@ -307,7 +355,7 @@ describe('projectRun', () => {
     actor = createActor(wiredRunMachine(scriptedActors({ goal: INPUT.goal })), { input });
     actor.start();
 
-    await nextWhere(actor, stageIs('specReview'), 'spec review');
+    await toSpecReview(actor);
     actor.send({ type: 'SPEC_APPROVED' });
     await nextWhere(actor, stageIs('planReview'), 'plan review');
     actor.send({ type: 'PLAN_APPROVED' });

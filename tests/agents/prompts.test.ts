@@ -25,8 +25,16 @@ describe('ROLE_SYSTEM', () => {
     }
   });
 
-  it('keeps every role from asking the person, and the PM from editing code', () => {
-    for (const role of ROLES) expect(ROLE_SYSTEM[role], role).toMatch(/Do not ask the person anything/);
+  it('keeps every role but the PM from asking the person, and the PM from editing code', () => {
+    for (const role of ROLES) {
+      if (role === 'pm') continue;
+      expect(ROLE_SYSTEM[role], role).toMatch(/Do not ask the person anything/);
+    }
+    // §3.4: the PM is the one role that asks, and `ask_user` ends its turn.
+    expect(ROLE_SYSTEM.pm).toMatch(/ask them with `ask_user`/);
+    expect(ROLE_SYSTEM.pm).toMatch(/returns at once and ends your turn/);
+    expect(ROLE_SYSTEM.pm).toMatch(/answers arrive as your next message/);
+    expect(ROLE_SYSTEM.pm).not.toMatch(/Do not ask the person anything/);
     expect(ROLE_SYSTEM.pm).toMatch(/never edit code/);
     expect(ROLE_SYSTEM.reviewer).toMatch(/Never edit code/);
     expect(ROLE_SYSTEM.verifier).toMatch(/do not change code/);
@@ -36,6 +44,7 @@ describe('ROLE_SYSTEM', () => {
     expect(ROLE_SYSTEM.builder).toMatch(/commit there/);
     expect(ROLE_SYSTEM.builder).toMatch(/Never write in the repo root/);
     expect(ROLE_SYSTEM.pm).toMatch(/Decide yourself when the fix is mechanical/);
+    expect(ROLE_SYSTEM.pm).toMatch(/Grill the person in rounds through `ask_user`/);
     expect(ROLE_SYSTEM.planner).toMatch(/must not overlap/);
   });
 });

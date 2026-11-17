@@ -693,6 +693,49 @@ describe('runMachine', () => {
     expect(test.context().chat).toEqual([{ from: 'pm', text: 'still grilling you' }]);
   });
 
+  it('shows the question round and the answers in the chat, and ignores an answer to another ask', () => {
+    const test = harness();
+    const questions = [
+      {
+        id: 'q1',
+        title: 'Which provider?',
+        body: '',
+        kind: 'single' as const,
+        options: [
+          { id: 'google', label: 'Google Workspace' },
+          { id: 'okta', label: 'Okta' },
+        ],
+        recommended: 'google',
+        allowOther: true,
+      },
+    ];
+    test.pmEmit({ type: 'PM_ASKING', scope: null, askId: 'ask-1', questions });
+    expect(test.context().chat).toEqual([{ from: 'pm', text: 'Which provider?' }]);
+
+    // An answer to an ask that is not the one waiting is not this round's answer (§3.4).
+    test.send({ type: 'ANSWER', askId: 'ask-9', answers: [{ questionId: 'q1', picked: ['okta'], text: '', skipped: false }] });
+    expect(test.context().chat).toHaveLength(1);
+    expect(test.log.pmReceived.filter((event) => event.type === 'ANSWER')).toEqual([]);
+
+    // The round's answer goes to the PM with the ask id, and the chat says it in the person's words.
+    const answers = [{ questionId: 'q1', picked: ['google'], text: '', skipped: false }];
+    test.send({ type: 'ROUND_ANSWERED', answers });
+    expect(test.log.pmReceived.at(-1)).toEqual({ type: 'ANSWER', askId: 'ask-1', answers });
+    expect(test.context().chat.at(-1)).toEqual({ from: 'person', text: 'Which provider? → Google Workspace' });
+
+    // A round of several questions is one chat entry that lists them.
+    test.pmEmit({
+      type: 'PM_ASKING',
+      scope: null,
+      askId: 'ask-2',
+      questions: [
+        { id: 'q2', title: 'Which domains?', body: '', kind: 'text' as const, options: [], allowOther: true },
+        { id: 'q3', title: 'Keep the old login?', body: '', kind: 'confirm' as const, options: [], allowOther: false },
+      ],
+    });
+    expect(test.context().chat.at(-1)).toEqual({ from: 'pm', text: '2 questions: Which domains? | Keep the old login?' });
+  });
+
   it('survives a persist → restore in intake without a second PM session', () => {
     const test = harness();
     expect(test.log.pms).toHaveLength(1);

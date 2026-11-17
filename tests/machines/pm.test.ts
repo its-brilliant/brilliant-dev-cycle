@@ -4,7 +4,9 @@ import type { AgentJob } from '../../src/contracts/actors.js';
 import type { Question } from '../../src/contracts/domain.js';
 import type { AgentOutcome, AgentToParent, ParentToAgent, PersonEvent, PmToRun, RunToPm } from '../../src/contracts/events.js';
 import {
+  ASK_USER_AVAILABLE,
   answeredNote,
+  answersPrompt,
   decidePrompt,
   intakePrompt,
   messagePrompt,
@@ -140,11 +142,19 @@ function harness(steps: Step[] = []) {
 
 describe('pmMachine: prompts are pure and name the submit tool', () => {
   it('each kind names the tool the PM has to call', () => {
-    // Until the question tool is attached (slice 3) the PM is not told to call it.
-    expect(intakePrompt(GOAL)).not.toContain('ask_user');
+    // §3.4: the question tool is attached, and the intake prompt teaches the grill-me method in full.
+    expect(ASK_USER_AVAILABLE).toBe(true);
+    expect(intakePrompt(GOAL)).toContain('ask_user');
     expect(intakePrompt(GOAL)).toContain('submit_brief');
-    expect(intakePrompt(GOAL, true)).toContain('ask_user');
-    expect(intakePrompt(GOAL, true)).toContain('submit_brief');
+    expect(intakePrompt(GOAL)).toContain('recommended');
+    expect(intakePrompt(GOAL)).toMatch(/design tree/);
+    expect(intakePrompt(GOAL)).toMatch(/round/i);
+    expect(intakePrompt(GOAL)).toMatch(/never ask the\s+person something you can look up/i);
+    expect(intakePrompt(GOAL)).toMatch(/`confirm` question/);
+    expect(intakePrompt(GOAL)).toMatch(/returns at once/);
+    // The prompt for a CLI without the tool still says to write the brief and list assumptions.
+    expect(intakePrompt(GOAL, false)).not.toContain('ask_user');
+    expect(intakePrompt(GOAL, false)).toContain('assumptions');
     expect(messagePrompt('why is p2 waiting?')).toContain('`reply`');
     expect(messagePrompt('why is p2 waiting?')).not.toContain('`propose`');
     const decide = decidePrompt({
@@ -309,6 +319,73 @@ describe('pmMachine', () => {
     expect(test.script.prompts).toHaveLength(promptsBefore);
     expect(test.received[3]).toEqual({ type: 'PM_ASK_DONE', askId: 'ask-1' });
     expect(test.state()).toBe('thinking');
+  });
+
+  it("the person's answer reaches the PM session as the follow-up of the turn that asked", () => {
+    const questions: Question[] = [
+      {
+        id: 'q1',
+        title: 'Which sign-in provider?',
+        body: '',
+        kind: 'single',
+        options: [
+          { id: 'google', label: 'Google Workspace' },
+          { id: 'okta', label: 'Okta' },
+        ],
+        recommended: 'google',
+        allowOther: true,
+      },
+      { id: 'q2', title: 'Which domains?', body: '', kind: 'text', options: [], allowOther: true },
+      { id: 'q3', title: 'Keep the old login?', body: '', kind: 'confirm', options: [], allowOther: false },
+    ];
+    const answers = [
+      { questionId: 'q1', picked: ['google'], text: '', skipped: false },
+      { questionId: 'q2', picked: [], text: 'acme.com only', skipped: false },
+      { questionId: 'q3', picked: [], text: '', skipped: true },
+    ];
+    const test = harness([{ kind: 'asking', askId: 'ask-1', questions }]);
+    test.step();
+    expect(test.received[0]).toMatchObject({ type: 'PM_ASKING', askId: 'ask-1', questions });
+
+    test.send({ type: 'ANSWER', askId: 'ask-1', answers });
+
+    // The answer is not a turn of its own: it is pasted into the session as the turn's next message,
+    // with the labels the person picked rather than the option ids (§3.4, §9.4).
+    expect(test.script.prompts).toHaveLength(2);
+    const followUp = nth(test.script.prompts, 1);
+    expect(followUp).toBe(answersPrompt(questions, answers));
+    expect(followUp).toContain('The person answered:');
+    expect(followUp).toContain('- Which sign-in provider? → Google Workspace');
+    expect(followUp).toContain('- Which domains? → acme.com only');
+    expect(followUp).toContain('- Keep the old login? → skipped (decide yourself and say so in assumptions)');
+    expect(followUp).not.toContain('google');
+    expect(test.received.at(-1)).toEqual({ type: 'PM_ASK_DONE', askId: 'ask-1' });
+
+    // The transcript keeps both sides of the round: the questions and the answers (§5.4).
+    const transcript = (test.pm().getSnapshot().context as { transcript: TranscriptEntry[] }).transcript;
+    const texts = transcript.map((entry) => entry.text);
+    expect(texts).toContain('Asked the person: Which sign-in provider? | Which domains? | Keep the old login?');
+    expect(texts).toContain(followUp);
+    // The request is still the current one: the turn goes on until the PM submits.
+    expect((test.pm().getSnapshot().context as { current: unknown }).current).not.toBeNull();
+  });
+
+  it('an answer to an ask this turn is not waiting on is recorded, not pasted', () => {
+    const test = harness([
+      {
+        kind: 'asking',
+        askId: 'ask-1',
+        questions: [{ id: 'q1', title: 'Which?', body: '', kind: 'text', options: [], allowOther: true }],
+      },
+    ]);
+    test.step();
+
+    test.send({ type: 'ANSWER', askId: 'ask-9', answers: [{ questionId: 'q1', picked: [], text: 'later', skipped: false }] });
+
+    expect(test.script.prompts).toHaveLength(1);
+    expect(test.received.at(-1)).toEqual({ type: 'PM_ASK_DONE', askId: 'ask-9' });
+    const transcript = (test.pm().getSnapshot().context as { transcript: TranscriptEntry[] }).transcript;
+    expect(transcript.at(-1)?.text).toBe(answeredNote('ask-9', [{ questionId: 'q1', picked: [], text: 'later', skipped: false }]));
   });
 
   it('a lost session restarts once, primed with the transcript, and retries the request', () => {

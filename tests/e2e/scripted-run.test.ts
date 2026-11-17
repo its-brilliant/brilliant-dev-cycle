@@ -112,13 +112,38 @@ function closesPerKey(): Record<string, number> {
   return counts;
 }
 
-/** The person's side of a run up to building: approve the spec and the plan as they appear. */
-async function approveToBuilding(runId: string, watcher: Watcher): Promise<void> {
+/**
+ * The person's side of intake (§4.1): the PM asks one question through the question tool, the person
+ * picks the recommended option, and the PM writes the brief from the answer. Returns the view that
+ * shows the question, so a test can look at the card the person saw.
+ */
+async function answerIntake(runId: string, watcher: Watcher): Promise<View> {
+  const asked = await watcher.until(
+    (view) => view.asking !== null && view.asking !== undefined,
+    'the PM to ask about the goal',
+  );
+  const asking = asked.asking as {
+    askId: string;
+    questions: Array<{ id: string; recommended?: string }>;
+  };
+  const question = asking.questions[0];
+  if (question === undefined) throw new Error('the PM asked nothing');
+  await send(runId, {
+    type: 'ROUND_ANSWERED',
+    answers: [{ questionId: question.id, picked: [question.recommended ?? ''], text: '', skipped: false }],
+  });
+  return asked;
+}
+
+/** The person's side of a run up to building: answer the intake question, approve the spec and the plan. */
+async function approveToBuilding(runId: string, watcher: Watcher): Promise<View> {
+  const asked = await answerIntake(runId, watcher);
   await watcher.stage('specReview');
   await send(runId, { type: 'SPEC_APPROVED' });
   await watcher.stage('planReview');
   await send(runId, { type: 'PLAN_APPROVED' });
   await watcher.stage('building');
+  return asked;
 }
 
 beforeEach(() => {
@@ -156,12 +181,21 @@ describe('a scripted run, end to end', () => {
       expect(runId).toMatch(/^r-/);
       const watcher = await watch(runId);
 
-      // A person in intake: skip the rest of the questions, confirm the shared understanding.
+      // A person in intake: the PM asks one question through the question tool, and the view shows
+      // it as a card that waits on the person (§3.4, §7.2).
       await watcher.stage('intake');
-      await send(runId, { type: 'SKIP_QUESTIONS' });
-      await send(runId, { type: 'UNDERSTANDING_CONFIRMED' });
+      const asked = await approveToBuilding(runId, watcher);
+      expect(asked.needsYou).toBe(true);
+      const asking = asked.asking as {
+        askId: string;
+        questions: Array<{ id: string; kind: string; recommended?: string; options: Array<{ id: string; label: string }> }>;
+      };
+      const question = asking.questions[0];
+      expect(asking.questions.map((candidate) => candidate.id)).toEqual(['q-scope']);
+      expect(question?.kind).toBe('single');
+      expect(question?.options).toHaveLength(2);
+      expect(question?.recommended).toBeDefined();
 
-      await approveToBuilding(runId, watcher);
       await watcher.stage('shipping');
       await send(runId, { type: 'OPEN_PR', draft: true });
       const done = await watcher.stage('done');
@@ -194,14 +228,20 @@ describe('a scripted run, end to end', () => {
       // The agents that were only needed once closed their terminals (§5.5).
       expect(scriptedCloses).toContain(`scripted-${runId}/spec/1`);
       expect(scriptedCloses).toContain(`scripted-${runId}/plan/1`);
-      // The person's messages reached the PM as turns, and its answers reached the run's chat.
-      expect(scriptedSends.some((sent) => sent.text?.includes('The person says'))).toBe(true);
+      // The person's side of the conversation reached the PM as turns, and its replies reached the
+      // run's chat: the answers to the question came into the PM's own session as the turn's next
+      // message, in the person's words (§3.4), and the chat shows the round and the answer (§9.4).
+      const answersTurn = scriptedSends.find((sent) => sent.text?.includes('The person answered:'));
+      expect(answersTurn?.terminal).toBe(`scripted-${runId}/pm`);
+      expect(answersTurn?.text).toContain('How far should this go? → The smallest change that works');
+      const chat = done.chat as Array<{ from: string; text: string }>;
+      expect(chat[0]).toEqual({ from: 'pm', text: 'How far should this go?' });
+      expect(chat[1]).toEqual({ from: 'you', text: 'How far should this go? → The smallest change that works' });
+      expect(chat.filter((entry) => entry.from === 'pm').length).toBeGreaterThanOrEqual(1);
       // The PM's very first request went into its session as a follow-up: it was not lost while the
       // terminal was starting, and the scripted PM answered that turn, not its job prompt (§5.4).
       const intakeTurn = scriptedSends.find((sent) => sent.text?.includes("The person's goal:"));
       expect(intakeTurn?.terminal).toBe(`scripted-${runId}/pm`);
-      const chat = done.chat as Array<{ from: string; text: string }>;
-      expect(chat.filter((entry) => entry.from === 'pm').length).toBeGreaterThanOrEqual(1);
       // CLOSE went only to sessions that were still up.
       expect(warnings.filter((text) => text.includes('stopped actor'))).toEqual([]);
       // Every terminal the run launched is closed exactly once, the PM's included (§5.5).

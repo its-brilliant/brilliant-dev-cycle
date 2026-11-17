@@ -5,9 +5,10 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { assign, createActor, setup } from 'xstate';
 import type { AnyActorRef, InspectionEvent, PromiseActorLogic, Snapshot } from 'xstate';
-import type { AgentJob, LaunchAgentOutput } from '../../src/contracts/actors.js';
-import type { AgentToParent, AgentOutcome } from '../../src/contracts/events.js';
+import type { AgentJob, LaunchAgentOutput, ObserveAgentInput } from '../../src/contracts/actors.js';
+import type { AgentObservation, AgentToParent, AgentOutcome } from '../../src/contracts/events.js';
 import { agentDir, deliveredFile, inboxFile } from '../../src/contracts/inbox.js';
+import { ask, asksFile, reportedFile } from '../../src/agents/asks.js';
 import { BDC_ADAPT, hcEffects } from '../../src/effects/hc.js';
 import type { AgentCommand, HcEffects } from '../../src/effects/hc.js';
 import { agentMachine } from '../../src/machines/agent.js';
@@ -129,6 +130,7 @@ const workingEvents = (terminal: string): string[] => [statusLine(terminal, 'bdc
 
 const tempDirs: string[] = [];
 const harnesses: Harness[] = [];
+const stopped: Array<() => void> = [];
 
 function tempDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bdc-hc-'));
@@ -137,6 +139,7 @@ function tempDir(): string {
 }
 
 afterEach(() => {
+  for (const stop of stopped.splice(0)) stop();
   for (const harness of harnesses.splice(0)) harness.stop();
   for (const dir of tempDirs.splice(0)) {
     try {
@@ -277,6 +280,45 @@ async function launch(effects: HcEffects, input: AgentJob): Promise<LaunchAgentO
   if (snapshot.status !== 'done') throw new Error(`the launch failed: ${String(snapshot.error)}`);
   return snapshot.output;
 }
+
+/**
+ * The observer on its own, collecting every observation it reports. A restart is a new instance on
+ * the same terminal, which is what a restored daemon does (§5.7).
+ */
+function observing(effects: HcEffects, input: AgentJob, terminal: string): { events: AgentObservation[]; restart: () => void } {
+  const events: AgentObservation[] = [];
+  const parent = setup({
+    types: { context: {} as ObserveAgentInput, input: {} as ObserveAgentInput, events: {} as AgentObservation },
+    actors: { observe: effects.observeAgent },
+    actions: {
+      collect: ({ event }) => {
+        events.push(event as AgentObservation);
+      },
+    },
+  }).createMachine({
+    id: 'observer-parent',
+    context: ({ input: machineInput }) => machineInput,
+    invoke: { src: 'observe', input: ({ context }: { context: ObserveAgentInput }) => context },
+    on: { '*': { actions: 'collect' } },
+  });
+  const start = (): AnyActorRef => {
+    const actor = createActor(parent, { input: { job: input, terminal } });
+    actor.start();
+    stopped.push(() => actor.stop());
+    return actor;
+  };
+  start();
+  return {
+    events,
+    restart: () => {
+      start();
+    },
+  };
+}
+
+/** Every ask the observer reported. */
+const asks = (observer: { events: AgentObservation[] }): Array<Extract<AgentObservation, { type: 'OBS_ASKING' }>> =>
+  observer.events.filter((event): event is Extract<AgentObservation, { type: 'OBS_ASKING' }> => event.type === 'OBS_ASKING');
 
 // ── tests ─────────────────────────────────────────────────────────────────────────────────
 
@@ -502,6 +544,54 @@ describe('hcEffects.observeAgent', () => {
       JSON.stringify(harness.agent.getSnapshot().value) === JSON.stringify({ running: { active: 'working' } }),
     );
     expect(needsYou(harness)).toHaveLength(1);
+  });
+});
+
+describe('hcEffects.observeAgent and the question tool', () => {
+  const questions = [
+    { id: 'q-scope', title: 'How far should this go?', body: '', kind: 'single' as const, options: [{ id: 'small', label: 'Small' }], recommended: 'small', allowOther: true },
+  ];
+
+  it('reports an ask_user call as OBS_ASKING, and a restarted observer does not report it again', async () => {
+    const dir = tempDir();
+    const root = path.join(dir, 'acme-api');
+    const fake = fakeHc({ dir, address: TERMINAL });
+    fake.events(workingEvents(TERMINAL));
+    fake.screen(screen('ordinary-working.txt'));
+    const effects = hcEffects({ hcBin: fake.bin, commandFor, pollMs: 10, root, runId: RUN_ID });
+
+    const observer = observing(effects, job(), TERMINAL);
+    await until('the observer to read the screen', () => fake.callsOf('read').length > 0);
+
+    // The PM's ask_user call filed its questions; the observer turns them into one observation.
+    expect(ask({ root, run: RUN_ID, key: job().key }, { questions })).toEqual({ ok: true, askId: 'ask-1' });
+    expect(await until('the ask', () => asks(observer)[0])).toEqual({ type: 'OBS_ASKING', askId: 'ask-1', questions });
+    expect(fs.readFileSync(reportedFile(agentDir(root, RUN_ID, job().key)), 'utf8').trim()).toBe('1');
+
+    // A restarted observer re-reads asks.jsonl: the same ask is not put to the person twice (§5.7).
+    observer.restart();
+    await wait(200);
+    expect(asks(observer)).toHaveLength(1);
+
+    // A second round is a new ask, and it goes through.
+    expect(ask({ root, run: RUN_ID, key: job().key }, { questions })).toEqual({ ok: true, askId: 'ask-2' });
+    expect(await until('the second ask', () => asks(observer)[1])).toEqual({ type: 'OBS_ASKING', askId: 'ask-2', questions });
+  });
+
+  it('reports an ask that was already in the file when it started', async () => {
+    const dir = tempDir();
+    const root = path.join(dir, 'acme-api');
+    const fake = fakeHc({ dir, address: TERMINAL });
+    fake.events(workingEvents(TERMINAL));
+    fake.screen(screen('ordinary-working.txt'));
+    // The PM asked while the daemon was down: nothing may be lost on the way back up (§5.7).
+    ask({ root, run: RUN_ID, key: job().key }, { questions });
+    const effects = hcEffects({ hcBin: fake.bin, commandFor, pollMs: 10, root, runId: RUN_ID });
+
+    const observer = observing(effects, job(), TERMINAL);
+
+    expect(await until('the ask', () => asks(observer)[0])).toEqual({ type: 'OBS_ASKING', askId: 'ask-1', questions });
+    expect(fs.existsSync(asksFile(agentDir(root, RUN_ID, job().key)))).toBe(true);
   });
 });
 

@@ -425,6 +425,84 @@ describe('agentMachine', () => {
     expect(harness.closed).toEqual([{ terminal: TERMINAL }]);
   });
 
+  it('waits in askingYou without settling, and the answers arrive as its next message', async () => {
+    const job = { ...jobFor(recordings[3]!), keepAlive: true };
+    const harness = startAgent(job);
+    await flush();
+    const questions = [{ id: 'q1', title: 'Which?', body: '', kind: 'single' as const, options: [], allowOther: true }];
+    harness.observe(status('pi', 'working'), { type: 'OBS_ASKING', askId: 'ask-1', questions });
+    expect(harness.agent.getSnapshot().value).toEqual({ running: 'askingYou' });
+
+    // The PM ended its turn on purpose: a settled status is not an empty result here (§3.3).
+    harness.observe(status('pi', 'idle'));
+    harness.clock.increment(50);
+    await flush();
+    expect(harness.agent.getSnapshot().value).toEqual({ running: 'askingYou' });
+    expect(results(harness)).toEqual([]);
+    expect(harness.sent).toEqual([]);
+
+    // The answers are pasted as the follow-up of the turn that asked (§3.4).
+    harness.agent.send({ type: 'FOLLOW_UP', prompt: 'The person answered:\n- Which? → Small' });
+    await flush();
+    expect(harness.sent).toEqual([{ terminal: TERMINAL, text: 'The person answered:\n- Which? → Small' }]);
+    expect(harness.received().at(-1)).toEqual({ type: 'AGENT_ASK_DONE', key: job.key, askId: 'ask-1' });
+    expect(harness.agent.getSnapshot().value).toEqual({ running: { active: 'working' } });
+    expect(harness.agent.getSnapshot().context.askId).toBeNull();
+    expect(harness.agent.getSnapshot().context.answeredAsks).toEqual(['ask-1']);
+
+    // The turn that carries on ends in a result, as any other turn does.
+    harness.observe(status('pi', 'working'), submitted({ round: 2 }), status('pi', 'done'));
+    await flush();
+    expect(outcomes(harness)).toEqual([{ status: 'done', submission: { round: 2 } }]);
+  });
+
+  it('ignores a repeated ask the person already answered', async () => {
+    const job = { ...jobFor(recordings[3]!), keepAlive: true };
+    const harness = startAgent(job);
+    await flush();
+    const questions = [{ id: 'q1', title: 'Which?', body: '', kind: 'confirm' as const, options: [], allowOther: false }];
+    harness.observe(status('pi', 'working'), { type: 'OBS_ASKING', askId: 'ask-1', questions });
+    harness.agent.send({ type: 'FOLLOW_UP', prompt: 'The person answered:\n- Which? → yes' });
+    await flush();
+    expect(harness.received().filter((event) => event.type === 'AGENT_ASKING')).toHaveLength(1);
+
+    // A restarted observer reads asks.jsonl again and reports the same ask (§5.7): not asked twice.
+    harness.observe({ type: 'OBS_ASKING', askId: 'ask-1', questions });
+    await flush();
+    expect(harness.received().filter((event) => event.type === 'AGENT_ASKING')).toHaveLength(1);
+    expect(harness.agent.getSnapshot().value).toEqual({ running: { active: 'working' } });
+
+    // A new ask still goes through.
+    harness.observe({ type: 'OBS_ASKING', askId: 'ask-2', questions });
+    await flush();
+    expect(harness.agent.getSnapshot().value).toEqual({ running: 'askingYou' });
+    expect(harness.received().at(-1)).toMatchObject({ type: 'AGENT_ASKING', askId: 'ask-2' });
+  });
+
+  it('restores in askingYou with its answered asks, without asking the person again', async () => {
+    const job = { ...jobFor(recordings[3]!), keepAlive: true };
+    const harness = startAgent(job);
+    await flush();
+    const questions = [{ id: 'q1', title: 'Which?', body: '', kind: 'single' as const, options: [], allowOther: true }];
+    harness.observe(status('pi', 'working'), { type: 'OBS_ASKING', askId: 'ask-1', questions });
+
+    harness.restore();
+    await flush();
+    expect(harness.agent.getSnapshot().value).toEqual({ running: 'askingYou' });
+    // The context is JSON, and it kept the ask and what was answered (§5.7).
+    const context = harness.agent.getSnapshot().context as unknown as Record<string, unknown>;
+    expect(JSON.parse(JSON.stringify(context))).toEqual(context);
+    expect(context.askId).toBe('ask-1');
+    expect(context.answeredAsks).toEqual([]);
+    expect(harness.received().filter((event) => event.type === 'AGENT_ASKING')).toHaveLength(1);
+
+    // The answer still arrives after the restore, and the turn carries on.
+    harness.agent.send({ type: 'FOLLOW_UP', prompt: 'The person answered:\n- Which? → Small' });
+    await flush();
+    expect(harness.received().at(-1)).toEqual({ type: 'AGENT_ASK_DONE', key: job.key, askId: 'ask-1' });
+    expect(harness.agent.getSnapshot().value).toEqual({ running: { active: 'working' } });
+  });
+
   it('pauses the role timeout while the agent is inside ask_user', async () => {
     const job = jobFor(recordings[3]!);
     const harness = startAgent(job);
@@ -771,7 +849,7 @@ describe('agentMachine', () => {
       'running.active.working': ['CLOSE', 'OBS_ASKING', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED', 'OBS_STATUS', 'OBS_SUBMITTED'],
       'running.active.settled': ['CLOSE', 'OBS_ASKING', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED', 'OBS_STATUS', 'OBS_SUBMITTED'],
       'running.sending': ['CLOSE', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED'],
-      'running.askingYou': ['CLOSE', 'OBS_ASK_DONE', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED'],
+      'running.askingYou': ['CLOSE', 'FOLLOW_UP', 'OBS_ASK_DONE', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED'],
       'running.needsYou': ['CLOSE', 'OBS_EXITED', 'OBS_PROMPT', 'OBS_PROMPT_CLEARED', 'PROMPT_CHOICE'],
       done: ['CLOSE', 'FOLLOW_UP'],
       empty: ['CLOSE'],

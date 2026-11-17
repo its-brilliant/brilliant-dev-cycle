@@ -4,7 +4,8 @@ import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ACCEPTED, GET_CONTEXT_TOOL, createBdcServer } from '../../src/agents/mcp-server.js';
+import { ACCEPTED, ASKED, ASK_USER_TOOL, GET_CONTEXT_TOOL, createBdcServer } from '../../src/agents/mcp-server.js';
+import { asksFile, readAsks } from '../../src/agents/asks.js';
 import { SUBMIT_TOOLS, type SubmitKind } from '../../src/contracts/actors.js';
 import { SUBMISSIONS, agentDir, inboxFile, type InboxEntry } from '../../src/contracts/inbox.js';
 import type { SubmitEnv } from '../../src/agents/submit.js';
@@ -81,11 +82,107 @@ describe('bdc mcp', () => {
     const { client, env, close } = await connect('brief');
     try {
       const { tools } = await client.listTools();
-      expect(tools.map((tool) => tool.name).sort()).toEqual([SUBMIT_TOOLS.brief, SUBMIT_TOOLS.decision, SUBMIT_TOOLS.reply, GET_CONTEXT_TOOL].sort());
+      expect(tools.map((tool) => tool.name).sort()).toEqual(
+        [SUBMIT_TOOLS.brief, SUBMIT_TOOLS.decision, SUBMIT_TOOLS.reply, ASK_USER_TOOL, GET_CONTEXT_TOOL].sort(),
+      );
       const result = await client.callTool({ name: SUBMIT_TOOLS.reply, arguments: { text: 'On it.' } });
       expect(result.isError).toBeFalsy();
       const lines = fs.readFileSync(inboxFile(agentDir(env.root, env.run, env.key)), 'utf8').trim().split('\n');
       expect(JSON.parse(lines.at(-1) ?? '{}')).toMatchObject({ kind: 'reply', submission: { text: 'On it.' } });
+    } finally {
+      await close();
+    }
+  });
+
+  it('advertises the question tool to a PM job, with the Question schema of the contract', async () => {
+    const { client, close } = await connect('brief');
+    try {
+      const { tools } = await client.listTools();
+      const askUser = tools.find((tool) => tool.name === ASK_USER_TOOL);
+      expect(askUser).toBeDefined();
+      expect(askUser?.description).toMatch(/returns at once/i);
+      expect(askUser?.description).toMatch(/answers arrive as your next message/i);
+      const questions = (askUser?.inputSchema.properties as Record<string, { type?: string; items?: Record<string, unknown> }>)
+        .questions;
+      expect(questions?.type).toBe('array');
+      expect(Object.keys((questions?.items?.properties ?? {}) as Record<string, unknown>).sort()).toEqual(
+        ['allowOther', 'body', 'id', 'kind', 'options', 'recommended', 'title'].sort(),
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it('files an accepted ask_user call in asks.jsonl and answers with the end-your-turn text', async () => {
+    const { client, env, close } = await connect('brief');
+    try {
+      const questions = [
+        { id: 'q-scope', title: 'How far?', kind: 'single', options: [{ id: 'small', label: 'Small' }], recommended: 'small' },
+      ];
+      const result = await client.callTool({ name: ASK_USER_TOOL, arguments: { questions } });
+
+      expect(result.isError).toBeFalsy();
+      // §3.4: not a blocking call — the tool says the turn is over and returns.
+      expect(result.content).toEqual([{ type: 'text', text: ASKED }]);
+      expect(ASKED).toMatch(/End your turn now/);
+      expect(ASKED).toMatch(/answers arrive as your next message/);
+
+      const asks = readAsks(asksFile(agentDir(env.root, env.run, env.key)));
+      expect(asks).toHaveLength(1);
+      expect(asks[0]).toMatchObject({ askId: 'ask-1', questions: [{ id: 'q-scope', kind: 'single', recommended: 'small' }] });
+      // The contract's defaults are filled in, so the observer hands the machine whole questions.
+      expect(asks[0]?.questions[0]).toMatchObject({ body: '', allowOther: true });
+      // Nothing went to the inbox: an ask is not a submission.
+      expect(inbox(env)).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
+
+  it('counts ask ids from 1 per job, so two rounds are ask-1 and ask-2', async () => {
+    const { client, env, close } = await connect('brief');
+    try {
+      const question = { id: 'q1', title: 'Which?', kind: 'text' };
+      await client.callTool({ name: ASK_USER_TOOL, arguments: { questions: [question] } });
+      await client.callTool({ name: ASK_USER_TOOL, arguments: { questions: [question] } });
+      expect(readAsks(asksFile(agentDir(env.root, env.run, env.key))).map((entry) => entry.askId)).toEqual(['ask-1', 'ask-2']);
+    } finally {
+      await close();
+    }
+  });
+
+  it('answers rejected questions with the problems and files nothing', async () => {
+    const { client, env, close } = await connect('brief');
+    try {
+      const none = await client.callTool({ name: ASK_USER_TOOL, arguments: { questions: [] } });
+      expect(none.isError).toBe(true);
+      const text = (none.content as Array<{ text: string }>)[0]?.text ?? '';
+      expect(text).toMatch(/^- questions: /m);
+      expect(text).toContain(`call ${ASK_USER_TOOL} again`);
+
+      const tooMany = Array.from({ length: 9 }, (_, index) => ({ id: `q${index}`, title: `Q${index}`, kind: 'text' }));
+      const over = await client.callTool({ name: ASK_USER_TOOL, arguments: { questions: tooMany } });
+      expect(over.isError).toBe(true);
+      expect((over.content as Array<{ text: string }>)[0]?.text).toMatch(/^- questions: /m);
+
+      const unnamed = await client.callTool({ name: ASK_USER_TOOL, arguments: { questions: [{ id: 'q1', kind: 'single' }] } });
+      expect(unnamed.isError).toBe(true);
+      expect((unnamed.content as Array<{ text: string }>)[0]?.text).toMatch(/^- questions\.0\.title: /m);
+
+      expect(readAsks(asksFile(agentDir(env.root, env.run, env.key)))).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
+
+  it('gives no question tool to a job that is not the PM', async () => {
+    const { client, close } = await connect('task');
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.map((tool) => tool.name)).not.toContain(ASK_USER_TOOL);
+      const result = await client.callTool({ name: ASK_USER_TOOL, arguments: { questions: [{ id: 'q1', title: 'Which?', kind: 'text' }] } });
+      expect(result.isError).toBe(true);
+      expect((result.content as Array<{ text: string }>)[0]?.text).toContain(SUBMIT_TOOLS.task);
     } finally {
       await close();
     }
