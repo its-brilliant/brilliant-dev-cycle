@@ -21,6 +21,7 @@ import { startDaemon } from '../daemon/server.js';
 import { closeRunTerminals } from '../effects/hc.js';
 import { realEffects } from '../effects/real.js';
 import { scriptedActors } from '../effects/scripted.js';
+import { checkMods, herdrPaths, installHerdr, repoRootFrom, stageForCheck, uninstallHerdr, type CheckReport } from '../herdr/install.js';
 
 export interface CliIO {
   out(text: string): void;
@@ -43,13 +44,16 @@ export const USAGE = `usage:
   bdc watch <dir> [--run <id>]
   bdc mcp
   bdc submit <kind> [json | --file <path>]
+  bdc herdr install|uninstall|check
 
 Starts runs and the project daemon, sends person events and prints run views (spec §7.2).
 Without --run a command uses the project's latest run.
 \`bdc chat\` is the PM chat and the question tool in a terminal: /quit leaves, /status says where the
 run is. \`bdc say\` sends one message to the PM and exits.
 \`bdc mcp\` is the MCP server bdc attaches to an agent, and \`bdc submit\` the same submission for
-a CLI without MCP; both read the AGENT_ENV bdc starts the agent with, so they only work inside a job.`;
+a CLI without MCP; both read the AGENT_ENV bdc starts the agent with, so they only work inside a job.
+\`bdc herdr install\` puts the bdc layout and mods in your Herdr app, \`uninstall\` takes them out,
+and \`check\` runs \`herdr-app check\` on every bdc mod (spec §9).`;
 
 /** What `bdc start` prints when the project has no `bdc.yaml` yet. */
 const EXAMPLE_CONFIG = `agents:
@@ -246,6 +250,62 @@ export async function daemon(args: string[], io: CliIO): Promise<number> {
     await server.stopDaemon();
     runs.stop();
   }
+}
+
+/**
+ * `bdc herdr install | uninstall | check` (spec §9, §12.5): the bdc Herdr layout and mods.
+ * `install` writes the files and then checks every mod it installed, `uninstall` removes exactly
+ * those files, and `check` assembles the checkout's mods in a throwaway Herdr home and checks
+ * them there, so neither the person's Herdr home nor their window is touched.
+ */
+export async function herdr(args: string[], io: CliIO): Promise<number> {
+  const [subcommand, ...rest] = args;
+  if (rest.length > 0) throw new UsageError(`herdr ${subcommand ?? ''} takes no arguments`);
+  const repoRoot = repoRootFrom();
+
+  switch (subcommand) {
+    case 'install': {
+      const installed = installHerdr({ repoRoot });
+      for (const mod of installed.installed) io.out(`installed ${mod}\n`);
+      for (const file of installed.layoutFiles) io.out(`installed ${file}\n`);
+      io.out(
+        installed.wrapper === null
+          ? `left ${herdrPaths().wrapper} alone: it is not a bdc wrapper\n`
+          : `wrote ${installed.wrapper}\n`,
+      );
+      const report = checkMods(installed.installed, { home: installed.home });
+      printChecks(io, report);
+      return report.ok ? 0 : 1;
+    }
+    case 'uninstall': {
+      const { removed, kept } = uninstallHerdr({ repoRoot });
+      for (const file of removed) io.out(`removed ${file}\n`);
+      for (const file of kept) io.out(`kept ${file}: it is not a bdc wrapper\n`);
+      if (removed.length === 0) io.out('nothing to remove\n');
+      return 0;
+    }
+    case 'check': {
+      const staged = stageForCheck({ repoRoot });
+      try {
+        const report = checkMods(staged.mods, { home: staged.home });
+        printChecks(io, report);
+        return report.ok ? 0 : 1;
+      } finally {
+        staged.cleanup();
+      }
+    }
+    default:
+      throw new UsageError('herdr takes install, uninstall or check');
+  }
+}
+
+/** What `herdr-app check` said about each mod, in the order it ran. */
+function printChecks(io: CliIO, report: CheckReport): void {
+  for (const check of report.checks) {
+    io.out(`${check.ok ? 'ok' : 'FAILED'}: ${path.basename(check.mod)}\n`);
+    if (!check.ok) io.out(`${check.output}\n`);
+  }
+  io.out(report.ok ? 'every bdc mod loads\n' : 'a bdc mod did not load\n');
 }
 
 /** `bdc mcp`: the job's MCP server over stdio, until the agent CLI closes the pipe (§3.4). */

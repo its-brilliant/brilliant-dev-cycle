@@ -15,6 +15,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "check:mods": "sh scripts/check-mods.sh",
     "check": "npm run typecheck && npm test"
   },
   "dependencies": {

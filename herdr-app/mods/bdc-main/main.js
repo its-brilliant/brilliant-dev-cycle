@@ -136,12 +136,12 @@ export default class BdcMain extends View {
   /** One person event through `bdc send`; a failure is shown inline, not thrown. */
   send(event, cx) {
     const target = this.target;
-    if (target === null) return Promise.resolve({ ok: false, error: "no project" });
+    if (target === null) return;
     this.error = "";
-    if (cx) cx.notify();
-    return this.bdc.send(target.root, event, target.runId).then((outcome) => {
+    cx.spawn(async (asyncCx) => {
+      const outcome = await this.bdc.send(target.root, event, target.runId);
       if (!outcome.ok) this.error = outcome.error;
-      return outcome;
+      asyncCx.notify();
     });
   }
 
@@ -172,7 +172,7 @@ export default class BdcMain extends View {
 
   // ── render ────────────────────────────────────────────────────────────────────────────────
 
-  render() {
+  render(cx) {
     const t = look(host.theme());
     const banner = this.banner(t);
     return v_flex()
@@ -182,7 +182,7 @@ export default class BdcMain extends View {
       .text_color(t.colors.fg)
       .child(this.header(t))
       .when(banner !== null, (column) => column.child(banner))
-      .child(this.screen(t));
+      .child(this.screen(t, cx));
   }
 
   /** Project, stepper, and the two run controls (spec §9.2). */
@@ -196,7 +196,7 @@ export default class BdcMain extends View {
       .px(14)
       .gap(16)
       .items_center()
-      .border(1)
+      .border_b(1)
       .border_color(t.colors.border)
       .child(div().text_size(t.type.title).font_semibold().child(this.target?.name ?? "No project"))
       .child(this.stepper(t, current))
@@ -269,7 +269,7 @@ export default class BdcMain extends View {
 
   cancel(cx) {
     this.confirmingCancel = false;
-    void this.send({ type: "CANCEL" }, cx);
+    this.send({ type: "CANCEL" }, cx);
   }
 
   /** "The run moved on" — a banner with the way back, instead of pulling the screen away. */
@@ -297,22 +297,22 @@ export default class BdcMain extends View {
       );
   }
 
-  screen(t) {
-    if (this.target === null) return this.renderScreen("setup", t);
-    if (this.target.runId === null) return this.renderScreen("goal", t);
+  screen(t, cx) {
+    if (this.target === null) return this.renderScreen("setup", t, cx);
+    if (this.target.runId === null) return this.renderScreen("goal", t, cx);
     if (this.view === null) {
       return v_flex().flex_1().min_h(0).p(16).child(t.label("Reading the run…", { color: t.colors.dim }));
     }
-    return this.renderScreen(this.open.screen, t);
+    return this.renderScreen(this.open.screen, t, cx);
   }
 
-  renderScreen(name, t) {
+  renderScreen(name, t, cx) {
     const module = SCREENS[name] ?? SCREENS.intake;
-    const content = module.render(this.view, this.screenCtx(name, t));
+    const content = module.render(this.view, this.screenCtx(name, t, cx));
     return v_flex().flex_1().min_h(0).p(14).child(content).when(this.error !== "", (column) => column.child(div().pt(8).text_size(t.type.small).text_color(t.colors.blocked).child(this.error)));
   }
 
-  screenCtx(name, t) {
+  screenCtx(name, t, cx) {
     const target = this.target;
     return {
       t,
@@ -321,7 +321,7 @@ export default class BdcMain extends View {
       view: this.view,
       send: (event) => (target === null ? Promise.resolve({ ok: false, error: "no project" }) : this.bdc.send(target.root, event, target.runId)),
       start: (goalText) => (target === null ? Promise.resolve({ ok: false, runId: null, error: "no project" }) : this.bdc.start(target.root, goalText)),
-      cx: undefined,
+      cx,
       state: this.state[name] ?? {},
       setState: (patch, handlerCx) => {
         this.state[name] = { ...this.state[name], ...patch };

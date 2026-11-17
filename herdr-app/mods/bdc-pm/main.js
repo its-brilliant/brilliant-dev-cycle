@@ -136,6 +136,8 @@ export default class BdcPm extends View {
     if (this.ask === null || key === null) return;
     const next = press(this.ask.state, key);
     if (next !== this.ask.state) this.ask = { askId: this.ask.askId, state: next };
+    // The card keeps the keys: a click on an option or on Other… must not leave them in the box.
+    this.handle.focus();
     if (next.sent) this.sendAnswers(cx);
     cx.notify();
   }
@@ -182,7 +184,7 @@ export default class BdcPm extends View {
       .px(12)
       .gap(8)
       .items_center()
-      .border(1)
+      .border_b(1)
       .border_color(t.colors.border)
       .child(div().text_size(t.type.title).font_semibold().child("PM"))
       .child(t.pill(words, tone));
@@ -388,7 +390,8 @@ export default class BdcPm extends View {
 
   questionFooter(t, state) {
     const row = h_flex().gap(8).items_center();
-    if (state.screen > 0) row.child(t.button("Back", { id: "pm-back", reason: "" }).on_click((_event, cx) => this.pressCard(BACK, cx)));
+    // Back is only there when there is a question behind this one (§9.1 rule 3).
+    if (state.screen > 0) row.child(t.button("Back", { id: "pm-back" }).on_click((_event, cx) => this.pressCard(BACK, cx)));
     row.child(t.button("Skip", { id: "pm-skip" }).on_click((_event, cx) => this.pressCard(SKIP, cx)));
     row.child(div().flex_1());
     row.child(div().text_size(t.type.tiny).text_color(t.colors.dim).child("1–9 to pick, Enter for the recommended"));
@@ -440,7 +443,7 @@ export default class BdcPm extends View {
       .flex_none()
       .gap(6)
       .p(10)
-      .border(1)
+      .border_t(1)
       .border_color(t.colors.border)
       .child(Input.new(this.input).h(54).px(10).py(9).rounded(t.radii.input).border(1).border_color(t.colors.input).bg(t.colors.canvas).text_size(t.type.ui).text_color(t.colors.fg))
       .child(
