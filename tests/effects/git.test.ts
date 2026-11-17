@@ -266,14 +266,14 @@ describe('mergeBranch', () => {
     const output = await merge({ into: phase, from: 'bdc/r-1/p1/t1' });
 
     expect(output).toEqual({ merged: false, conflicts: ['a.txt'] });
-    expect(fs.existsSync(path.join(phase, '.git')) || fs.statSync(path.join(phase, '.git')).isFile()).toBe(true);
     // No merge in progress: the next attempt starts from a clean worktree.
     expect(() => gitIn(phase, ['rev-parse', '--verify', 'MERGE_HEAD'])).toThrow();
     expect(gitIn(phase, ['status', '--porcelain'])).toBe('');
     expect(fs.readFileSync(path.join(phase, 'a.txt'), 'utf8')).toBe('the phase wrote this\n');
   });
 
-  it('refuses to overwrite changes left in the worktree', async () => {
+  it('refuses to overwrite changes left in the worktree, fast-forward or merge commit', async () => {
+    // A fast-forward that would overwrite the file somebody is editing.
     const { phase, task } = await phaseWithTask();
     write(task, 'a.txt', 'the task wrote this\n');
     commit(task, 'task edits a.txt');
@@ -281,6 +281,20 @@ describe('mergeBranch', () => {
 
     await expect(merge({ into: phase, from: 'bdc/r-1/p1/t1' })).rejects.toThrow(/does not throw away changes in a worktree/);
     expect(fs.readFileSync(path.join(phase, 'a.txt'), 'utf8')).toBe('somebody is still working here\n');
+
+    // And a merge commit that would: the phase branch moved on, so the merge cannot fast-forward.
+    const other = await phaseWithTask();
+    write(other.phase, 'phase.txt', 'from the phase\n');
+    commit(other.phase, 'phase work');
+    write(other.task, 'a.txt', 'the task wrote this\n');
+    commit(other.task, 'task edits a.txt');
+    write(other.phase, 'a.txt', 'still working here\n');
+
+    await expect(merge({ into: other.phase, from: 'bdc/r-1/p1/t1' })).rejects.toThrow(
+      /does not throw away changes in a worktree/,
+    );
+    expect(fs.readFileSync(path.join(other.phase, 'a.txt'), 'utf8')).toBe('still working here\n');
+    expect(() => gitIn(other.phase, ['rev-parse', '--verify', 'MERGE_HEAD'])).toThrow();
   });
 
   it('makes its merge commit with the repo identity', async () => {
