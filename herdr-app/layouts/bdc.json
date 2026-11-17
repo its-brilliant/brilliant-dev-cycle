@@ -1,0 +1,44 @@
+{
+  "id": "root",
+  "type": "row",
+  "preview": "layouts/bdc.svg",
+  "divider": { "width": 1, "color": "border" },
+  "children": [
+    {
+      "id": "sidebar",
+      "type": "column",
+      "size": { "px": 268 },
+      "min": 44,
+      "max": 480,
+      "background": "chrome",
+      "children": [
+        {
+          "id": "brand",
+          "type": "block",
+          "size": { "px": 46 },
+          "content": { "mod": "workspace-chrome" }
+        },
+        {
+          "id": "spaces",
+          "type": "block",
+          "size": { "weight": 1 },
+          "min": 90,
+          "content": { "mod": "spaces" }
+        }
+      ]
+    },
+    {
+      "id": "bdc-main",
+      "type": "block",
+      "size": { "weight": 1 },
+      "content": { "mod": "bdc-main" }
+    },
+    {
+      "id": "bdc-pm",
+      "type": "block",
+      "size": { "px": 380 },
+      "min": 300,
+      "content": { "mod": "bdc-pm" }
+    }
+  ]
+}
