@@ -1,7 +1,7 @@
 /**
- * The effects a real run is wired with (slice 2): agents run in hidden hc terminals with bdc's
- * MCP server attached; git, verification, proof and the pull request are still scripted until
- * slice 4.
+ * The effects a real run is wired with: agents run in hidden hc terminals with bdc's MCP server
+ * attached (§3.2, §3.4); git, verification, proof and the pull request are real (§7.3, §7.4,
+ * §4.4.1, §4.6).
  */
 import { fileURLToPath } from 'node:url';
 import { commandFor, writeMcpConfig } from '../agents/command.js';
@@ -9,7 +9,10 @@ import { AGENT_ENV, agentDir } from '../contracts/inbox.js';
 import type { RunInput } from '../machines/run.js';
 import type { WiredEffects } from '../runtime/wire.js';
 import { hcEffects } from './hc.js';
-import { scriptedActors } from './scripted.js';
+import { gitEffects } from './git.js';
+import { prEffect } from './pr.js';
+import { proofEffect } from './proof.js';
+import { verifyEffect } from './verify.js';
 
 /** How the MCP server runs bdc itself: this Node, this package's CLI. */
 export function bdcCommand(): string[] {
@@ -34,5 +37,11 @@ export function realEffects(input: RunInput, options: { hcBin?: string } = {}): 
       return commandFor(job, { mcpConfigPath, bdcBin });
     },
   });
-  return { ...scriptedActors({ goal: input.goal }), ...agents };
+  return {
+    ...agents,
+    ...gitEffects(),
+    runVerification: verifyEffect(),
+    checkProof: proofEffect({ base: input.root }),
+    ...prEffect(),
+  };
 }

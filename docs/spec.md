@@ -449,7 +449,7 @@ You can also answer by typing freely; the PM interprets it. You can override dir
 ### 7.3 Git
 
 - Root checkout never moves.
-- Branches: `bdc/<run>` (run), `bdc/<run>/<phase>` (phase), `bdc/<run>/<phase>/<task>` (task). Fixes are new commits on the task branch by the same builder, which then merges into the phase branch again. Worktrees under `.worktrees/` (git-ignored).
+- Branches: `bdc/<run>` (run), `bdc/<run>.<phase>` (phase), `bdc/<run>.<phase>.<task>` (task): siblings, because git cannot hold both `bdc/<run>` and `bdc/<run>/<phase>`. Fixes are new commits on the task branch by the same builder, which then merges into the phase branch again. Worktrees under `.worktrees/` (git-ignored).
 - Merge = fast-forward when possible, else a merge commit. Conflict → abort, then one of the conflicting builders resolves it in the phase worktree (artifact: merge committed).
 - The PR is opened from `bdc/<run>` to the base branch.
 

@@ -314,19 +314,19 @@ describe('phaseMachine', () => {
     await toMerging(h);
 
     expect(h.calls.ensureWorktree.map((ensure) => [ensure.branch, ensure.base])).toEqual([
-      ['bdc/r1/p1', 'bdc/r1'],
-      ['bdc/r1/p1/t1', 'bdc/r1/p1'],
-      ['bdc/r1/p1/t2', 'bdc/r1/p1'],
+      ['bdc/r1.p1', 'bdc/r1'],
+      ['bdc/r1.p1.t1', 'bdc/r1.p1'],
+      ['bdc/r1.p1.t2', 'bdc/r1.p1'],
     ]);
     expect(h.spawned.filter((job) => job.role === 'builder').map((job) => [job.key, job.keepAlive, job.submit, job.cwd])).toEqual([
-      ['r1/p1/t1/builder', true, 'task', '/repo/.worktrees/bdc/r1/p1/t1'],
-      ['r1/p1/t2/builder', true, 'task', '/repo/.worktrees/bdc/r1/p1/t2'],
+      ['r1/p1/t1/builder', true, 'task', '/repo/.worktrees/bdc/r1.p1.t1'],
+      ['r1/p1/t2/builder', true, 'task', '/repo/.worktrees/bdc/r1.p1.t2'],
     ]);
 
     await h.at('reviewing');
     expect(h.calls.mergeBranch).toEqual([
-      { into: '/repo/.worktrees/bdc/r1/p1', from: 'bdc/r1/p1/t1' },
-      { into: '/repo/.worktrees/bdc/r1/p1', from: 'bdc/r1/p1/t2' },
+      { into: '/repo/.worktrees/bdc/r1.p1', from: 'bdc/r1.p1.t1' },
+      { into: '/repo/.worktrees/bdc/r1.p1', from: 'bdc/r1.p1.t2' },
     ]);
   });
 
@@ -344,7 +344,7 @@ describe('phaseMachine', () => {
     expect(h.calls.runVerification[0]).toEqual({
       runId: 'r1',
       phaseId: 'p1',
-      worktree: '/repo/.worktrees/bdc/r1/p1',
+      worktree: '/repo/.worktrees/bdc/r1.p1',
       slot: 0,
       setup: null,
       extraChecks: [{ name: 'types', run: 'npm run typecheck' }],
@@ -358,13 +358,13 @@ describe('phaseMachine', () => {
     });
     // bdc's own proof (the test report) is an item, made from what verification captured.
     expect(h.calls.checkProof[0]?.items).toEqual([
-      { kind: 'tests', shows: 'the unit tests pass', file: 'report.json', by: 'bdc' },
+      { kind: 'tests', shows: 'the unit tests pass', file: '/repo/.worktrees/bdc/r1.p1/report.json', by: 'bdc' },
     ]);
 
     await h.at('passed');
     await h.at('done');
     expect(h.sent('PHASE_DONE')).toEqual([{ type: 'PHASE_DONE', phaseId: 'p1' }]);
-    expect(h.calls.mergeBranch.at(-1)).toEqual({ into: '/repo/.worktrees/run', from: 'bdc/r1/p1' });
+    expect(h.calls.mergeBranch.at(-1)).toEqual({ into: '/repo/.worktrees/run', from: 'bdc/r1.p1' });
     // The builders keep their sessions for fixes, so they are closed here; the reviewer closed
     // its own terminal when it reported (§5.5), so CLOSE is not sent to a stopped actor.
     expect(h.closed.sort()).toEqual(['r1/p1/t1/builder', 'r1/p1/t2/builder']);
@@ -448,7 +448,7 @@ describe('phaseMachine', () => {
     const needs = h.needsPm().at(-1);
     expect(needs?.blocker).toEqual({
       kind: 'conflict',
-      summary: 'merging bdc/r1/p1 into bdc/r1 conflicts',
+      summary: 'merging bdc/r1.p1 into bdc/r1 conflicts',
       evidence: ['src/a.ts'],
     });
     expect(h.sent('PHASE_DONE')).toHaveLength(0);
@@ -458,7 +458,7 @@ describe('phaseMachine', () => {
     let conflicted = false;
     const h = harness({
       merge: (merge) => {
-        if (!conflicted && merge.from === 'bdc/r1/p1/t2') {
+        if (!conflicted && merge.from === 'bdc/r1.p1.t2') {
           conflicted = true;
           return { merged: false, conflicts: ['src/b.ts'] };
         }
@@ -473,15 +473,15 @@ describe('phaseMachine', () => {
 
     h.done('builder-t2');
     await h.at('reviewing');
-    expect(h.calls.mergeBranch.filter((merge) => merge.from === 'bdc/r1/p1/t2')).toHaveLength(2);
+    expect(h.calls.mergeBranch.filter((merge) => merge.from === 'bdc/r1.p1.t2')).toHaveLength(2);
     // t1 was already merged; only the conflicted branch is merged again.
-    expect(h.calls.mergeBranch.filter((merge) => merge.from === 'bdc/r1/p1/t1')).toHaveLength(1);
+    expect(h.calls.mergeBranch.filter((merge) => merge.from === 'bdc/r1.p1.t1')).toHaveLength(1);
   });
 
   it('a blocking review goes to the PM, whose fix goes to the builder that touched the file', async () => {
     const h = harness({
       commits: (since) =>
-        since.branch === 'bdc/r1/p1/t1'
+        since.branch === 'bdc/r1.p1.t1'
           ? { commits: [{ sha: 'a1', files: ['src/a.ts'] }] }
           : { commits: [{ sha: 'b1', files: ['src/b.ts'] }] },
     });
@@ -516,8 +516,8 @@ describe('phaseMachine', () => {
 
     h.done('builder-t1');
     await h.at('merging');
-    expect(h.calls.mergeBranch.filter((merge) => merge.from === 'bdc/r1/p1/t1')).toHaveLength(2);
-    expect(h.calls.mergeBranch.filter((merge) => merge.from === 'bdc/r1/p1/t2')).toHaveLength(1);
+    expect(h.calls.mergeBranch.filter((merge) => merge.from === 'bdc/r1.p1.t1')).toHaveLength(2);
+    expect(h.calls.mergeBranch.filter((merge) => merge.from === 'bdc/r1.p1.t2')).toHaveLength(1);
     expect(h.context().attemptsUsed).toBe(1);
 
     await h.at('reviewing');
@@ -650,14 +650,14 @@ describe('phaseMachine', () => {
       'r1/p1/verifier',
       true,
       'proof',
-      '/repo/.worktrees/bdc/r1/p1',
+      '/repo/.worktrees/bdc/r1.p1',
     ]);
 
-    h.done('verifier', { items: [{ kind: 'screenshot', shows: 'the new sign-in screen', file: 'sign-in.png', by: 'verifier' }] });
+    h.done('verifier', { items: [{ kind: 'screenshot', shows: 'the new sign-in screen', file: '/repo/.worktrees/bdc/r1.p1/sign-in.png', by: 'verifier' }] });
     await h.at('passed');
     expect(h.calls.checkProof.at(-1)?.items).toEqual([
-      { kind: 'tests', shows: 'the unit tests pass', file: 'report.json', by: 'bdc' },
-      { kind: 'screenshot', shows: 'the new sign-in screen', file: 'sign-in.png', by: 'verifier' },
+      { kind: 'tests', shows: 'the unit tests pass', file: '/repo/.worktrees/bdc/r1.p1/report.json', by: 'bdc' },
+      { kind: 'screenshot', shows: 'the new sign-in screen', file: '/repo/.worktrees/bdc/r1.p1/sign-in.png', by: 'verifier' },
     ]);
   });
 
@@ -862,7 +862,7 @@ describe('phaseMachine persistence', () => {
     let conflicted = false;
     const h = harness({
       merge: (merge) => {
-        if (!conflicted && merge.from === 'bdc/r1/p1/t2') {
+        if (!conflicted && merge.from === 'bdc/r1.p1.t2') {
           conflicted = true;
           return { merged: false, conflicts: ['src/b.ts'] };
         }

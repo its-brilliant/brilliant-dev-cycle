@@ -62,6 +62,8 @@ function configOf(overrides: Record<string, unknown> = {}): ProjectConfig {
 
 /** What the stub children did, for the assertions. */
 interface Log {
+  /** Every run-branch worktree the run asked for before building. */
+  runWorktrees: Array<{ root: string; branch: string; base: string }>;
   pms: PmInput[];
   pmReceived: RunToPm[];
   phases: string[];
@@ -182,7 +184,7 @@ function harness(options: { config?: ProjectConfig; pr?: 'ok' | 'fail' } = {}) {
     pms: [],
     pmReceived: [],
     phases: [],
-    phaseReceived: new Map(),
+    phaseReceived: new Map(), runWorktrees: [],
     agents: [],
     promptChoices: [],
     prInputs: [],
@@ -205,7 +207,16 @@ function harness(options: { config?: ProjectConfig; pr?: 'ok' | 'fail' } = {}) {
           return { path: '.herd/pull-request.md' };
         });
   const machine = runMachine.provide({
-    actors: { pm: pmStub(log), phase: phaseStub(log), agent: agentStub(log), openPullRequest },
+    actors: {
+      pm: pmStub(log),
+      phase: phaseStub(log),
+      agent: agentStub(log),
+      openPullRequest,
+      ensureWorktree: fromPromise(async ({ input }: { input: { root: string; branch: string; base: string } }) => {
+        log.runWorktrees.push(input);
+        return { path: `${input.root}/.worktrees/run`, head: 'head' };
+      }),
+    },
   });
   let actor = createActor(machine, { input });
   actor.subscribe((snapshot) => REACHED.add(stageName(snapshot.value)));
@@ -240,15 +251,19 @@ function toSpecReview(test: Harness) {
 }
 
 /** Spec approved and a plan accepted: the run is building. */
-function toBuilding(test: Harness, plan: Plan = PLAN) {
+/** Building starts by preparing the run branch (an async effect), so phases exist only after it. */
+async function toBuilding(test: Harness, plan: Plan = PLAN) {
   toSpecReview(test);
   test.send({ type: 'SPEC_APPROVED' });
   test.agentEmit('r1/plan/1', { status: 'done', submission: plan });
   test.send({ type: 'PLAN_APPROVED' });
+  await settle();
 }
 
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 describe('runMachine: pure helpers', () => {
-  it('a plan edit is accepted only when the YAML is a valid plan', () => {
+  it('a plan edit is accepted only when the YAML is a valid plan', async () => {
     expect(planYamlIsValid('phases:\n  - id: p1\n    title: One\n    tasks: [{ id: t1, title: Do it }]\n    proof: [{ kind: tests }]\n')).toBe(true);
     expect(planYamlIsValid('phases: []')).toBe(false);
     expect(planYamlIsValid('not: [valid')).toBe(false);
@@ -256,7 +271,7 @@ describe('runMachine: pure helpers', () => {
     expect(planHashOf(PLAN)).toMatch(/^[0-9a-f]{8}$/);
   });
 
-  it('lens inputs carry the prompt, and only findings at or above block_on block', () => {
+  it('lens inputs carry the prompt, and only findings at or above block_on block', async () => {
     const config = ProjectConfig.parse({
       agents: AGENTS,
       lenses: { security: { block_on: 'high' }, docs: { block_on: 'none' } },
@@ -317,6 +332,7 @@ describe('runMachine', () => {
     expect(test.stage()).toBe('planReview');
     expect(test.context().plan).toEqual(PLAN);
     test.send({ type: 'PLAN_APPROVED' });
+    await settle();
 
     // Build: p1 has no deps, p2 waits on p1.
     expect(test.stage()).toBe('building');
@@ -324,6 +340,8 @@ describe('runMachine', () => {
     const phaseInput = test.log.phases.length === 1 ? childOf(test.run(), phaseChildId('p1')).getSnapshot().context : null;
     expect(phaseInput?.runBranch).toBe('bdc/r1');
     expect(phaseInput?.runWorktree).toBe('/repo/.worktrees/bdc-r1');
+    // Before any phase, the run branch was made from the base branch (§7.3).
+    expect(test.log.runWorktrees).toEqual([{ root: '/repo', branch: 'bdc/r1', base: 'main' }]);
     expect(phaseInput?.doneDeps).toEqual([]);
     expect(phaseInput?.lenses.security?.prompt).toBe('Look for injection');
     expect(phaseInput?.maxAttempts).toBe(3);
@@ -356,7 +374,7 @@ describe('runMachine', () => {
     expect(test.context().pr).toEqual({ path: '.herd/pull-request.md' });
   });
 
-  it('requesting changes sends the spec writer back with the comments, and bumps the version', () => {
+  it('requesting changes sends the spec writer back with the comments, and bumps the version', async () => {
     const test = harness();
     toSpecReview(test);
     test.send({ type: 'SPEC_COMMENT', comment: { id: 'c1', quote: 'health', prefix: '', suffix: '', body: 'say which port' } });
@@ -373,7 +391,7 @@ describe('runMachine', () => {
     expect(test.context().specVersion).toBe(2);
   });
 
-  it('ignores a change request with nothing to act on', () => {
+  it('ignores a change request with nothing to act on', async () => {
     const test = harness();
     toSpecReview(test);
     test.send({ type: 'SPEC_CHANGES_REQUESTED' });
@@ -381,7 +399,7 @@ describe('runMachine', () => {
     expect(test.log.agents).toHaveLength(1);
   });
 
-  it('rejects a plan edit that does not parse and accepts one that does', () => {
+  it('rejects a plan edit that does not parse and accepts one that does', async () => {
     const test = harness();
     toSpecReview(test);
     test.send({ type: 'SPEC_APPROVED' });
@@ -398,7 +416,7 @@ describe('runMachine', () => {
     expect(test.context().plan?.phases.map((phase) => phase.id)).toEqual(['p9']);
   });
 
-  it('retries the planner twice, then asks the PM', () => {
+  it('retries the planner twice, then asks the PM', async () => {
     const test = harness();
     toSpecReview(test);
     test.send({ type: 'SPEC_APPROVED' });
@@ -419,9 +437,9 @@ describe('runMachine', () => {
     expect(test.log.agents.at(-1)?.key).toBe('r1/plan/4');
   });
 
-  it('respects concurrency: four independent phases, two at a time', () => {
+  it('respects concurrency: four independent phases, two at a time', async () => {
     const test = harness({ config: configOf({ concurrency: 2 }) });
-    toBuilding(test, WIDE_PLAN);
+    await toBuilding(test, WIDE_PLAN);
     expect(test.log.phases).toEqual(['p1', 'p2']);
 
     const activeCounts: number[] = [];
@@ -439,9 +457,9 @@ describe('runMachine', () => {
     expect(Math.max(...activeCounts)).toBeLessThanOrEqual(2);
   });
 
-  it('never grants more verification slots than the repo allows', () => {
+  it('never grants more verification slots than the repo allows', async () => {
     const test = harness({ config: configOf({ concurrency: 2, verification: { parallel: 1 } }) });
-    toBuilding(test, WIDE_PLAN);
+    await toBuilding(test, WIDE_PLAN);
     test.phaseEmit('p1', { type: 'PHASE_VERIFY_SLOT_REQUEST', phaseId: 'p1' });
     test.phaseEmit('p2', { type: 'PHASE_VERIFY_SLOT_REQUEST', phaseId: 'p2' });
     expect(test.phaseSaw('p1')).toEqual([{ type: 'VERIFY_SLOT_GRANTED', slot: 0 }]);
@@ -458,9 +476,9 @@ describe('runMachine', () => {
     expect(test.log.phases).toEqual(['p1', 'p2', 'p3']);
   });
 
-  it('grants a held verification slot again when the phase asks after a restore', () => {
+  it('grants a held verification slot again when the phase asks after a restore', async () => {
     const test = harness();
-    toBuilding(test);
+    await toBuilding(test);
     test.phaseEmit('p1', { type: 'PHASE_VERIFY_SLOT_REQUEST', phaseId: 'p1' });
     expect(test.phaseSaw('p1')).toEqual([{ type: 'VERIFY_SLOT_GRANTED', slot: 0 }]);
 
@@ -476,9 +494,9 @@ describe('runMachine', () => {
     expect(test.context().verifySlots.held).toEqual(['p1']);
   });
 
-  it('sends the PM a decision request for the blocked phase, and the decision to that phase only', () => {
+  it('sends the PM a decision request for the blocked phase, and the decision to that phase only', async () => {
     const test = harness({ config: configOf({ concurrency: 2 }) });
-    toBuilding(test, WIDE_PLAN);
+    await toBuilding(test, WIDE_PLAN);
     test.phaseEmit('p2', {
       type: 'PHASE_NEEDS_PM',
       phaseId: 'p2',
@@ -520,9 +538,9 @@ describe('runMachine', () => {
     expect(test.context().asking).toEqual({ scope: 'p2', askId: 'ask-2', questions });
   });
 
-  it('turns an agent prompt into a card and hands the choice to the agent that holds that key', () => {
+  it('turns an agent prompt into a card and hands the choice to the agent that holds that key', async () => {
     const test = harness();
-    toBuilding(test);
+    await toBuilding(test);
     const trust = { prompt: 'Trust this folder?', choices: ['Trust', "Don't"] };
 
     // A phase child forwards its builder's prompt (§3.3).
@@ -547,7 +565,7 @@ describe('runMachine', () => {
     expect(test.context().agentPrompts).toEqual([]);
   });
 
-  it('gives a stage agent its prompt choice, and forgets the prompt when it moves on', () => {
+  it('gives a stage agent its prompt choice, and forgets the prompt when it moves on', async () => {
     const test = harness();
     test.send({ type: 'UNDERSTANDING_CONFIRMED' });
     test.pmEmit({ type: 'PM_BRIEF', brief: BRIEF });
@@ -566,7 +584,7 @@ describe('runMachine', () => {
     expect(test.context().agentPrompts).toEqual([]);
   });
 
-  it('pauses in spec review and comes back to spec review', () => {
+  it('pauses in spec review and comes back to spec review', async () => {
     const test = harness();
     toSpecReview(test);
     test.send({ type: 'PAUSE' });
@@ -577,9 +595,9 @@ describe('runMachine', () => {
     expect(test.log.agents).toHaveLength(1);
   });
 
-  it('pauses in build and comes back to build with its phases', () => {
+  it('pauses in build and comes back to build with its phases', async () => {
     const test = harness({ config: configOf({ concurrency: 2 }) });
-    toBuilding(test, WIDE_PLAN);
+    await toBuilding(test, WIDE_PLAN);
     expect(test.log.phases).toEqual(['p1', 'p2']);
     test.send({ type: 'PAUSE' });
     expect(test.stage()).toBe('paused');
@@ -593,9 +611,9 @@ describe('runMachine', () => {
     expect(test.log.phases).toEqual(['p1', 'p2', 'p3']);
   });
 
-  it('holds results that arrive while paused and replays them on resume', () => {
+  it('holds results that arrive while paused and replays them on resume', async () => {
     const test = harness({ config: configOf({ concurrency: 2 }) });
-    toBuilding(test, WIDE_PLAN);
+    await toBuilding(test, WIDE_PLAN);
     test.send({ type: 'PAUSE' });
     test.phaseEmit('p1', { type: 'PHASE_DONE', phaseId: 'p1' });
     expect(test.context().phases.p1).toBe('active');
@@ -606,7 +624,7 @@ describe('runMachine', () => {
     expect(test.log.phases).toEqual(['p1', 'p2', 'p3']);
   });
 
-  it('cancels from intake, from spec review and from build', () => {
+  it('cancels from intake, from spec review and from build', async () => {
     const intake = harness();
     intake.send({ type: 'CANCEL' });
     expect(intake.stage()).toBe('cancelled');
@@ -622,7 +640,7 @@ describe('runMachine', () => {
     expect(building.stage()).toBe('cancelled');
   });
 
-  it('fails when a stage agent fails, and RETRY re-enters that stage', () => {
+  it('fails when a stage agent fails, and RETRY re-enters that stage', async () => {
     const test = harness();
     test.send({ type: 'UNDERSTANDING_CONFIRMED' });
     test.pmEmit({ type: 'PM_BRIEF', brief: BRIEF });
@@ -636,7 +654,7 @@ describe('runMachine', () => {
 
   it('fails when the pull request cannot be opened, and RETRY tries again', async () => {
     const test = harness({ pr: 'fail' });
-    toBuilding(test);
+    await toBuilding(test);
     test.phaseEmit('p1', { type: 'PHASE_DONE', phaseId: 'p1' });
     test.phaseEmit('p2', { type: 'PHASE_DONE', phaseId: 'p2' });
     test.agentEmit('r1/review:security/1', { status: 'done', submission: { findings: [] } });
@@ -651,9 +669,9 @@ describe('runMachine', () => {
     expect(test.log.prInputs[1]).toMatchObject({ draft: false });
   });
 
-  it('blocks the run on a blocking final finding and lets the PM continue it', () => {
+  it('blocks the run on a blocking final finding and lets the PM continue it', async () => {
     const test = harness();
-    toBuilding(test);
+    await toBuilding(test);
     test.phaseEmit('p1', { type: 'PHASE_DONE', phaseId: 'p1' });
     test.phaseEmit('p2', { type: 'PHASE_DONE', phaseId: 'p2' });
     test.agentEmit('r1/review:security/1', {
@@ -668,7 +686,7 @@ describe('runMachine', () => {
     expect(test.context().overrides.at(-1)).toMatchObject({ phaseId: 'run', who: 'pm' });
   });
 
-  it('applies a proposal by raising the event it proposed, and discards one without raising', () => {
+  it('applies a proposal by raising the event it proposed, and discards one without raising', async () => {
     const test = harness();
     toSpecReview(test);
     test.pmEmit({ type: 'PM_PROPOSAL', proposalId: 'pr-1', text: 'approve the spec', event: { type: 'SPEC_APPROVED' } });
@@ -685,7 +703,7 @@ describe('runMachine', () => {
     expect(test.context().proposals['pr-1']).toBeUndefined();
   });
 
-  it('keeps the chat and the questions the PM sent', () => {
+  it('keeps the chat and the questions the PM sent', async () => {
     const test = harness();
     test.send({ type: 'MESSAGE', text: 'how is it going?' });
     expect(test.log.pmReceived.at(-1)).toEqual({ type: 'MESSAGE', text: 'how is it going?' });
@@ -693,7 +711,7 @@ describe('runMachine', () => {
     expect(test.context().chat).toEqual([{ from: 'pm', text: 'still grilling you' }]);
   });
 
-  it('shows the question round and the answers in the chat, and ignores an answer to another ask', () => {
+  it('shows the question round and the answers in the chat, and ignores an answer to another ask', async () => {
     const test = harness();
     const questions = [
       {
@@ -736,7 +754,7 @@ describe('runMachine', () => {
     expect(test.context().chat.at(-1)).toEqual({ from: 'pm', text: '2 questions: Which domains? | Keep the old login?' });
   });
 
-  it('survives a persist → restore in intake without a second PM session', () => {
+  it('survives a persist → restore in intake without a second PM session', async () => {
     const test = harness();
     expect(test.log.pms).toHaveLength(1);
     test.restore();
@@ -748,7 +766,7 @@ describe('runMachine', () => {
     expect(test.log.pmReceived.at(-1)).toMatchObject({ type: 'MESSAGE' });
   });
 
-  it('survives a persist → restore in spec review without a second spec writer', () => {
+  it('survives a persist → restore in spec review without a second spec writer', async () => {
     const test = harness();
     toSpecReview(test);
     expect(test.log.agents).toHaveLength(1);
@@ -759,9 +777,9 @@ describe('runMachine', () => {
     expect(test.log.agents.map((job) => job.key)).toEqual(['r1/spec/1', 'r1/plan/1']);
   });
 
-  it('survives a persist → restore in build without spawning a phase twice', () => {
+  it('survives a persist → restore in build without spawning a phase twice', async () => {
     const test = harness({ config: configOf({ concurrency: 2 }) });
-    toBuilding(test, WIDE_PLAN);
+    await toBuilding(test, WIDE_PLAN);
     expect(test.log.phases).toEqual(['p1', 'p2']);
     test.restore();
     expect(test.stage()).toBe('building');
@@ -771,7 +789,7 @@ describe('runMachine', () => {
   });
 
   // Runs last: vitest runs the tests of a file in order.
-  it('reaches every top-level state of the run across these tests', () => {
+  it('reaches every top-level state of the run across these tests', async () => {
     const expected = ['intake', 'specDrafting', 'specReview', 'planning', 'planReview', 'building', 'finalReview', 'shipping', 'done', 'failed', 'cancelled', 'paused'];
     expect([...REACHED].filter((state) => expected.includes(state)).sort()).toEqual([...expected].sort());
   });

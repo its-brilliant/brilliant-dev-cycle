@@ -52,7 +52,7 @@ import {
   type VerificationSetup,
 } from '../contracts/domain.js';
 import { PersonEvent, type AgentToParent, type PhaseToRun, type PmToRun } from '../contracts/events.js';
-import type { AgentJob } from '../contracts/actors.js';
+import type { AgentJob, EnsureWorktreeInput, EnsureWorktreeOutput } from '../contracts/actors.js';
 import { answersInWords, pmMachine, type PmInput } from './pm.js';
 
 export interface RunInput {
@@ -444,6 +444,9 @@ export const runMachine = setup({
     pm: pmMachine as unknown as AnyActorLogic,
     phase: notProvided('phase'),
     agent: notProvided('agent'),
+    ensureWorktree: fromPromise<EnsureWorktreeOutput, EnsureWorktreeInput>(() => {
+      throw new Error('ensureWorktree not provided');
+    }),
     openPullRequest: fromPromise<OpenPullRequestOutput, OpenPullRequestInput>(() => {
       throw new Error('openPullRequest not provided');
     }),
@@ -676,6 +679,13 @@ export const runMachine = setup({
         event.type === 'AGENT_RESULT'
           ? context.agentPrompts.filter((prompt) => prompt.agentKey !== event.key)
           : context.agentPrompts,
+    }),
+    recordPrepareFailure: assign({
+      error: ({ context, event }) => {
+        const error = (event as { error?: unknown }).error;
+        const message = error instanceof Error ? error.message : String(error ?? 'unknown error');
+        return { where: context.stage, detail: `could not set up the run branch: ${message}` };
+      },
     }),
     recordAgentFailure: assign({
       error: ({ context, event }) => ({
@@ -1123,8 +1133,23 @@ export const runMachine = setup({
 
         // ── build: phases as a DAG (§4.4) ────────────────────────────────────────────
         building: {
-          entry: ['stageBuilding', 'initPhases', 'schedulePhases'],
-          always: [{ guard: 'allPhasesSettled', target: '#run.active.finalReview' }],
+          entry: 'stageBuilding',
+          initial: 'preparing',
+          states: {
+            // The run branch and its worktree come first: every phase branches from it and merges into it (§7.3).
+            preparing: {
+              invoke: {
+                src: 'ensureWorktree',
+                input: ({ context }) => ({ root: context.root, branch: runBranchFor(context.runId), base: context.config.base }),
+                onDone: { target: 'phases' },
+                onError: { target: '#run.failed', actions: 'recordPrepareFailure' },
+              },
+            },
+            phases: {
+              entry: ['initPhases', 'schedulePhases'],
+              always: [{ guard: 'allPhasesSettled', target: '#run.active.finalReview' }],
+            },
+          },
           on: {
             PHASE_DONE: { actions: ['markPhaseDone', 'releaseSlot', 'schedulePhases', 'broadcastDepDone', 'clearPhasePrompts'] },
             PHASE_STOPPED: { actions: ['markPhaseStopped', 'releaseSlot', 'schedulePhases', 'clearPhasePrompts'] },

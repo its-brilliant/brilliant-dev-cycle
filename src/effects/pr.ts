@@ -22,7 +22,7 @@ import type { PromiseActorLogic } from 'xstate';
 import { z } from 'zod';
 import { RunView, type FindingView, type PhaseView } from '../contracts/view.js';
 import type { OpenPullRequestInput, OpenPullRequestOutput } from '../machines/run.js';
-import { gitCall, gitText, outputTail, refBranch, runProcess, type GitContext, type RunCommand } from './git.js';
+import { gitCall, gitText, outputTail, runProcess, type GitContext, type RunCommand } from './git.js';
 
 // ── the body ──────────────────────────────────────────────────────────────────────────────
 
@@ -436,7 +436,7 @@ function commentBody(phase: PhaseView, published: Map<string, string>): string {
 }
 
 async function openGithubTarget(ctx: PrContext, input: OpenPullRequestInput, run: RunData, target: GithubTarget): Promise<string> {
-  const branch = refBranch(input.runBranch);
+  const branch = input.runBranch;
   // The run branch first: a pull request needs it on the remote. Never forced: a push that is not a
   // fast-forward is somebody else's work, and bdc says so instead of overwriting it.
   await gitText(ctx, input.root, ['push', '-u', 'origin', branch]);

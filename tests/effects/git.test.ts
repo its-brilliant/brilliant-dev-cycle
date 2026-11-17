@@ -13,7 +13,7 @@ import type {
   MergeBranchInput,
   MergeBranchOutput,
 } from '../../src/contracts/actors.js';
-import { gitEffects, refBranch, worktreePathFor } from '../../src/effects/git.js';
+import { gitEffects, worktreePathFor } from '../../src/effects/git.js';
 
 // ── throwaway repositories ────────────────────────────────────────────────────────────────
 // The real git, in a temp directory: these effects are git, so a fake would prove nothing. Each
@@ -101,19 +101,12 @@ afterEach(() => {
 
 // ── branch names ────────────────────────────────────────────────────────────────────────
 
-describe('refBranch', () => {
-  it('keeps the §7.3 names git can hold and flattens the ones it cannot', () => {
-    expect(refBranch('main')).toBe('main');
-    expect(refBranch('bdc/r-1')).toBe('bdc/r-1');
-    expect(refBranch('bdc/r-1/p1')).toBe('bdc/r-1@p1');
-    expect(refBranch('bdc/r-1/p1/t1')).toBe('bdc/r-1@p1@t1');
-  });
-
-  it('lets the run, phase and task branches exist at once, which §7.3 names cannot', () => {
+describe('branch names (§7.3)', () => {
+  it('lets the run, phase and task branches exist at once: they are siblings, not nested', () => {
     const root = repo();
-    expect(() => gitIn(root, ['branch', 'bdc/r-1', 'main'])).not.toThrow();
-    // The name §7.3 writes is not a ref git can create next to the run branch.
-    expect(() => gitIn(root, ['branch', 'bdc/r-1/p1', 'main'])).toThrow(/cannot lock ref/);
+    for (const branch of ['bdc/r-1', 'bdc/r-1.p1', 'bdc/r-1.p1.t1']) expect(() => gitIn(root, ['branch', branch, 'main'])).not.toThrow();
+    // A nested name is not a ref git can create next to the run branch, which is why bdc does not use them.
+    expect(() => gitIn(root, ['branch', 'bdc/r-1/p1', 'main'])).toThrow();
   });
 });
 
@@ -138,15 +131,15 @@ describe('ensureWorktree', () => {
 
   it('is idempotent: the second call reuses the branch and the worktree', async () => {
     const root = repo();
-    const first = await ensure({ root, branch: 'bdc/r-1/p1', base: 'main' });
+    const first = await ensure({ root, branch: 'bdc/r-1.p1', base: 'main' });
     // A commit the branch got in the meantime must survive the second call: no branch is recreated.
     write(first.path, 'work.txt', 'work\n');
     const head = commit(first.path, 'work on the phase branch');
 
-    const second = await ensure({ root, branch: 'bdc/r-1/p1', base: 'main' });
+    const second = await ensure({ root, branch: 'bdc/r-1.p1', base: 'main' });
 
     expect(second).toEqual({ path: first.path, head });
-    expect(gitIn(root, ['rev-parse', refBranch('bdc/r-1/p1')]).trim()).toBe(head);
+    expect(gitIn(root, ['rev-parse', 'bdc/r-1.p1']).trim()).toBe(head);
     expect(gitIn(root, ['worktree', 'list', '--porcelain']).split('worktree ').length - 1).toBe(2);
   });
 
@@ -157,7 +150,7 @@ describe('ensureWorktree', () => {
     gitIn(root, ['commit', '-q', '-m', 'a gitignore']);
 
     await ensure({ root, branch: 'bdc/r-1', base: 'main' });
-    await ensure({ root, branch: 'bdc/r-1/p1', base: 'bdc/r-1' });
+    await ensure({ root, branch: 'bdc/r-1.p1', base: 'bdc/r-1' });
 
     const exclude = fs.readFileSync(path.join(root, '.git/info/exclude'), 'utf8');
     expect(exclude.split('\n').filter((line) => line === '.worktrees/')).toHaveLength(1);
@@ -171,7 +164,7 @@ describe('ensureWorktree', () => {
     const beforeHead = gitIn(root, ['rev-parse', 'HEAD']).trim();
 
     await ensure({ root, branch: 'bdc/r-1', base: 'main' });
-    await ensure({ root, branch: 'bdc/r-1/p1', base: 'bdc/r-1' });
+    await ensure({ root, branch: 'bdc/r-1.p1', base: 'bdc/r-1' });
 
     expect(gitIn(root, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe(before);
     expect(gitIn(root, ['rev-parse', 'HEAD']).trim()).toBe(beforeHead);
@@ -181,11 +174,11 @@ describe('ensureWorktree', () => {
   it('refuses a worktree that has another branch checked out', async () => {
     const root = repo();
     gitIn(root, ['branch', 'elsewhere', 'main']);
-    const at = worktreePathFor(root, 'bdc/r-1/other');
+    const at = worktreePathFor(root, 'bdc/r-1.other');
     gitIn(root, ['worktree', 'add', at, 'elsewhere']);
 
-    await expect(ensure({ root, branch: 'bdc/r-1/other', base: 'main' })).rejects.toThrow(
-      new RegExp(`has elsewhere checked out, not ${refBranch('bdc/r-1/other')}`),
+    await expect(ensure({ root, branch: 'bdc/r-1.other', base: 'main' })).rejects.toThrow(
+      new RegExp(`has elsewhere checked out, not ${'bdc/r-1.other'}`),
     );
   });
 
@@ -205,8 +198,8 @@ describe('ensureWorktree', () => {
 /** The phase branch and one task branch of it, in their own worktrees: what the phase machine makes. */
 async function phaseWithTask(): Promise<{ root: string; phase: string; task: string }> {
   const root = repo();
-  const phase = (await run(effects.ensureWorktree, { root, branch: 'bdc/r-1/p1', base: 'main' })).path;
-  const task = (await run(effects.ensureWorktree, { root, branch: 'bdc/r-1/p1/t1', base: 'bdc/r-1/p1' })).path;
+  const phase = (await run(effects.ensureWorktree, { root, branch: 'bdc/r-1.p1', base: 'main' })).path;
+  const task = (await run(effects.ensureWorktree, { root, branch: 'bdc/r-1.p1.t1', base: 'bdc/r-1.p1' })).path;
   return { root, phase, task };
 }
 
@@ -218,7 +211,7 @@ describe('mergeBranch', () => {
     write(task, 'task.txt', 'from the task\n');
     const head = commit(task, 'the task');
 
-    const output = await merge({ into: phase, from: 'bdc/r-1/p1/t1' });
+    const output = await merge({ into: phase, from: 'bdc/r-1.p1.t1' });
 
     expect(output).toEqual({ merged: true, head });
     expect(gitIn(phase, ['rev-parse', 'HEAD']).trim()).toBe(head);
@@ -234,13 +227,13 @@ describe('mergeBranch', () => {
     write(task, 'task.txt', 'from the task\n');
     commit(task, 'task work');
 
-    const output = await merge({ into: phase, from: 'bdc/r-1/p1/t1' });
+    const output = await merge({ into: phase, from: 'bdc/r-1.p1.t1' });
 
     expect(output.merged).toBe(true);
     if (!output.merged) throw new Error('unreachable');
     expect(gitIn(phase, ['rev-parse', 'HEAD']).trim()).toBe(output.head);
     expect(gitIn(phase, ['rev-list', '--parents', '-n', '1', 'HEAD']).trim().split(' ')).toHaveLength(3);
-    expect(gitIn(phase, ['log', '-1', '--format=%s']).trim()).toBe('bdc: merge bdc/r-1/p1/t1');
+    expect(gitIn(phase, ['log', '-1', '--format=%s']).trim()).toBe('bdc: merge bdc/r-1.p1.t1');
     expect(fs.readFileSync(path.join(phase, 'task.txt'), 'utf8')).toBe('from the task\n');
   });
 
@@ -248,9 +241,9 @@ describe('mergeBranch', () => {
     const { phase, task } = await phaseWithTask();
     write(task, 'task.txt', 'from the task\n');
     const head = commit(task, 'the task');
-    await merge({ into: phase, from: 'bdc/r-1/p1/t1' });
+    await merge({ into: phase, from: 'bdc/r-1.p1.t1' });
 
-    const again = await merge({ into: phase, from: 'bdc/r-1/p1/t1' });
+    const again = await merge({ into: phase, from: 'bdc/r-1.p1.t1' });
 
     expect(again).toEqual({ merged: true, head });
     expect(gitIn(phase, ['rev-parse', 'HEAD']).trim()).toBe(head);
@@ -263,7 +256,7 @@ describe('mergeBranch', () => {
     write(task, 'a.txt', 'the task wrote this\n');
     commit(task, 'task edits a.txt');
 
-    const output = await merge({ into: phase, from: 'bdc/r-1/p1/t1' });
+    const output = await merge({ into: phase, from: 'bdc/r-1.p1.t1' });
 
     expect(output).toEqual({ merged: false, conflicts: ['a.txt'] });
     // No merge in progress: the next attempt starts from a clean worktree.
@@ -279,7 +272,7 @@ describe('mergeBranch', () => {
     commit(task, 'task edits a.txt');
     write(phase, 'a.txt', 'somebody is still working here\n');
 
-    await expect(merge({ into: phase, from: 'bdc/r-1/p1/t1' })).rejects.toThrow(/does not throw away changes in a worktree/);
+    await expect(merge({ into: phase, from: 'bdc/r-1.p1.t1' })).rejects.toThrow(/does not throw away changes in a worktree/);
     expect(fs.readFileSync(path.join(phase, 'a.txt'), 'utf8')).toBe('somebody is still working here\n');
 
     // And a merge commit that would: the phase branch moved on, so the merge cannot fast-forward.
@@ -290,7 +283,7 @@ describe('mergeBranch', () => {
     commit(other.task, 'task edits a.txt');
     write(other.phase, 'a.txt', 'still working here\n');
 
-    await expect(merge({ into: other.phase, from: 'bdc/r-1/p1/t1' })).rejects.toThrow(
+    await expect(merge({ into: other.phase, from: 'bdc/r-1.p1.t1' })).rejects.toThrow(
       /does not throw away changes in a worktree/,
     );
     expect(fs.readFileSync(path.join(other.phase, 'a.txt'), 'utf8')).toBe('still working here\n');
@@ -306,7 +299,7 @@ describe('mergeBranch', () => {
     gitIn(phase, ['config', 'user.name', 'A Person']);
     gitIn(phase, ['config', 'user.email', 'person@example.com']);
 
-    await merge({ into: phase, from: 'bdc/r-1/p1/t1' });
+    await merge({ into: phase, from: 'bdc/r-1.p1.t1' });
 
     expect(gitIn(phase, ['log', '-1', '--format=%an <%ae>']).trim()).toBe('A Person <person@example.com>');
   });
@@ -321,8 +314,8 @@ describe('mergeBranch', () => {
       const root = repo();
       gitIn(root, ['config', '--unset', 'user.name']);
       gitIn(root, ['config', '--unset', 'user.email']);
-      const phase = (await run(effects.ensureWorktree, { root, branch: 'bdc/r-1/p1', base: 'main' })).path;
-      const task = (await run(effects.ensureWorktree, { root, branch: 'bdc/r-1/p1/t1', base: 'bdc/r-1/p1' })).path;
+      const phase = (await run(effects.ensureWorktree, { root, branch: 'bdc/r-1.p1', base: 'main' })).path;
+      const task = (await run(effects.ensureWorktree, { root, branch: 'bdc/r-1.p1.t1', base: 'bdc/r-1.p1' })).path;
       write(phase, 'phase.txt', 'from the phase\n');
       gitIn(phase, ['add', '-A']);
       execFileSync('git', ['-C', phase, '-c', 'user.name=x', '-c', 'user.email=x@example.com', 'commit', '-q', '-m', 'phase work']);
@@ -330,7 +323,7 @@ describe('mergeBranch', () => {
       gitIn(task, ['add', '-A']);
       execFileSync('git', ['-C', task, '-c', 'user.name=x', '-c', 'user.email=x@example.com', 'commit', '-q', '-m', 'task work']);
 
-      await merge({ into: phase, from: 'bdc/r-1/p1/t1' });
+      await merge({ into: phase, from: 'bdc/r-1.p1.t1' });
 
       expect(gitIn(phase, ['log', '-1', '--format=%an <%ae>']).trim()).toBe('bdc <bdc@localhost>');
     } finally {
@@ -355,14 +348,14 @@ describe('commitsSince', () => {
     write(task, 'docs/two.md', 'two\n');
     const second = commit(task, 'two');
 
-    const output = await commits({ root, branch: 'bdc/r-1/p1/t1', base: 'bdc/r-1/p1' });
+    const output = await commits({ root, branch: 'bdc/r-1.p1.t1', base: 'bdc/r-1.p1' });
 
     expect(output.commits).toEqual([
       { sha: second, files: ['docs/two.md', 'src/two.ts'] },
       { sha: first, files: ['src/one.ts'] },
     ]);
     // The phase branch has nothing of its own yet.
-    expect(await commits({ root, branch: 'bdc/r-1/p1', base: 'bdc/r-1/p1' })).toEqual({ commits: [] });
-    expect(gitIn(phase, ['rev-parse', 'HEAD']).trim()).toBe(gitIn(root, ['rev-parse', refBranch('bdc/r-1/p1')]).trim());
+    expect(await commits({ root, branch: 'bdc/r-1.p1', base: 'bdc/r-1.p1' })).toEqual({ commits: [] });
+    expect(gitIn(phase, ['rev-parse', 'HEAD']).trim()).toBe(gitIn(root, ['rev-parse', 'bdc/r-1.p1']).trim());
   });
 });

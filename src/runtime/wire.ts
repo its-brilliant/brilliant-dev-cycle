@@ -71,6 +71,7 @@ export function wiredRunMachine(effects: WiredEffects) {
   });
   return runMachine.provide({
     actors: {
+      ensureWorktree: effects.ensureWorktree,
       pm: pmMachine.provide({ actors: { agent } }),
       phase,
       agent,

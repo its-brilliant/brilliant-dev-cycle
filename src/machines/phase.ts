@@ -185,10 +185,13 @@ const doneOutput = <T>(event: PhaseEvent) => (event as unknown as { output: T })
 // ── derived values ─────────────────────────────────────────────────────────────────────
 
 function initialContext(input: PhaseInput): PhaseContext {
-  const phaseBranch = `bdc/${input.runId}/${input.phase.id}`;
+  // §7.3: one level under `bdc/`, parts joined with `.`. git cannot hold both `bdc/r1` and
+  // `bdc/r1/p1` (a ref is a file or a directory, not both), so the run, phase and task branches are
+  // siblings: `bdc/r1`, `bdc/r1.p1`, `bdc/r1.p1.t1`.
+  const phaseBranch = `bdc/${input.runId}.${input.phase.id}`;
   const tasks: PhaseTask[] = input.phase.tasks.map((task) => ({
     id: task.id,
-    branch: `${phaseBranch}/${task.id}`,
+    branch: `${phaseBranch}.${task.id}`,
     worktree: '',
     builderId: `builder-${task.id}`,
     key: `${input.runId}/${input.phase.id}/${task.id}/builder`,
@@ -310,6 +313,12 @@ function labels(context: PhaseContext, role: string, key: string, task?: string)
 /** `r1/p1/t1/builder/r2` → `r1/p1/t1/builder`: fresh builders of a task are numbered off its first key. */
 function baseBuilderKey(key: string): string {
   return key.replace(/\/r\d+$/, '');
+}
+
+/** A proof file named relative to the phase worktree, made absolute so the proof check can find it. */
+export function inWorktree(worktree: string, file: string): string {
+  if (file.startsWith('/') || worktree === '') return file;
+  return `${worktree.replace(/\/+$/, '')}/${file.replace(/^\.\//, '')}`;
 }
 
 function builderJob(context: PhaseContext, task: PhaseTask): AgentJob {
@@ -676,7 +685,7 @@ export const phaseMachine = setup({
           fromBdc.push(
             file === undefined
               ? { kind: requirement.kind, shows: requirement.shows, by: 'bdc' }
-              : { kind: requirement.kind, shows: requirement.shows, file, by: 'bdc' },
+              : { kind: requirement.kind, shows: requirement.shows, file: inWorktree(context.phaseWorktree, file), by: 'bdc' },
           );
         }
         return [...fromBdc, ...fromVerifier];
@@ -716,7 +725,13 @@ export const phaseMachine = setup({
         const outcome = asAgentResult(event).outcome;
         const submission = outcome.status === 'done' ? (outcome.submission as { items?: ProofItem[] } | null | undefined) : undefined;
         const fromBdc = context.proofItems.filter((item) => item.by === 'bdc');
-        return [...fromBdc, ...(submission?.items ?? [])];
+        // The verifier works in the phase worktree: its files are relative to it, and it made them.
+        const fromVerifier = (submission?.items ?? []).map((item) => ({
+          ...item,
+          by: 'verifier' as const,
+          ...(item.file === undefined ? {} : { file: inWorktree(context.phaseWorktree, item.file) }),
+        }));
+        return [...fromBdc, ...fromVerifier];
       },
     }),
     blockOnProofFailure: assign({

@@ -10,6 +10,7 @@
  * `bdc start` created in the CLI process) is adopted on first use, so the daemon picks up runs it
  * did not create itself.
  */
+import { lensPrompts as readLensPrompts } from '../herd/lenses.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { PersonEvent } from '../contracts/events.js';
@@ -135,7 +136,10 @@ export class ProjectRuns {
   }
 
   #input(runId: string, goal: string, config: ProjectConfig): RunInput {
-    return { runId, root: this.#paths.root, goal, config, lensPrompts: this.#options.lensPrompts ?? {} };
+    // Lens prompts are read once, when the run is created (§8): the project's copy, else the shared
+    // prompt, else the built-in default. A run keeps the prompts it started with.
+    const lensPrompts = this.#options.lensPrompts ?? readLensPrompts(this.#paths.root, Object.keys(config.lenses));
+    return { runId, root: this.#paths.root, goal, config, lensPrompts };
   }
 
   #readInput(runId: string): RunInput | null {
