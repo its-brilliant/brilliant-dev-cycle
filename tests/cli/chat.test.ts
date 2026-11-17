@@ -117,7 +117,8 @@ beforeEach(async () => {
     machineVersion: 1,
     input: {},
     store,
-    project: (snapshot: SnapshotFrom<AnyStateMachine>) => (snapshot.context as { view: RunView }).view as unknown as JsonValue,
+    project: (snapshot: SnapshotFrom<AnyStateMachine>) =>
+      (snapshot.context as { view: RunView }).view as unknown as JsonValue,
   });
   host.start();
   daemon = await startDaemon({ root, hostFor: (runId) => (runId === RUN_ID ? host : undefined), runs: () => [RUN_ID] });

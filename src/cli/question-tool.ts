@@ -130,7 +130,9 @@ function pressSummary(state: AskState, key: Key): AskState {
 }
 
 function pressTyping(state: AskState, key: Key): AskState {
-  if (key === ENTER) return answerAndAdvance(state, { picked: [], text: state.text, skipped: state.text.trim() === '' });
+  if (key === ENTER) {
+    return answerAndAdvance(state, { picked: [], text: state.text, skipped: state.text.trim() === '' });
+  }
   if (key === BACKSPACE) return { ...state, text: state.text.slice(0, -1) };
   if (key === ESC) return { ...state, typing: false };
   if (isPrintable(key)) return { ...state, text: state.text + key };
@@ -160,8 +162,9 @@ function pressOptions(state: AskState, key: Key): AskState {
       if (question.kind === 'multi') return answerAndAdvance(state, { picked: state.picked, text: '', skipped: false });
       if (question.kind === 'text') return { ...state, typing: true };
       // Enter accepts the recommended answer (§3.4); without one, the option the mark is on.
-      const chosen =
-        options.find((option) => option.id === question.recommended) ?? (question.kind === 'confirm' ? options[0] : options[state.cursor]);
+      const recommended = options.find((option) => option.id === question.recommended);
+      const marked = question.kind === 'confirm' ? options[0] : options[state.cursor];
+      const chosen = recommended ?? marked;
       if (chosen === undefined) return state;
       return answerAndAdvance(state, { picked: [chosen.id], text: '', skipped: false });
     }
@@ -190,7 +193,9 @@ function renderTyping(state: AskState, question: Question): string[] {
   const others = optionsOf(question);
   if (others.length > 0) {
     lines.push('', 'instead of one of these:');
-    for (const option of others) lines.push(`  ${option.label}${option.id === question.recommended ? '  (recommended)' : ''}`);
+    for (const option of others) {
+      lines.push(`  ${option.label}${option.id === question.recommended ? '  (recommended)' : ''}`);
+    }
   }
   return lines;
 }

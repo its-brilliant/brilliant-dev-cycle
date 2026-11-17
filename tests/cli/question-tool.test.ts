@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Question } from '../../src/contracts/domain.js';
+import type { Answer, Question } from '../../src/contracts/domain.js';
 import { press, render, result, startAsk, type AskState } from '../../src/cli/question-tool.js';
 
 function question(overrides: Partial<Question> & Pick<Question, 'id' | 'title' | 'kind'>): Question {
@@ -43,6 +43,15 @@ const features = question({
 const notes = question({ id: 'notes', title: 'Anything else?', kind: 'text' });
 const understanding = question({ id: 'understanding', title: 'Did we get it right?', kind: 'confirm' });
 
+/** One answer as the card sends it: options picked, text typed, or skipped. */
+function answered(questionId: string, picked: string[] = [], text = ''): Answer {
+  return { questionId, picked, text, skipped: false };
+}
+
+function skipped(questionId: string): Answer {
+  return { questionId, picked: [], text: '', skipped: true };
+}
+
 /** Press a sequence of keys, as a person would. */
 function type(state: AskState, keys: string[]): AskState {
   return keys.reduce((current, key) => press(current, key), state);
@@ -74,14 +83,14 @@ describe('the question tool', () => {
   it('accepts the recommended option with Enter and moves to the next question', () => {
     const state = press(startAsk([provider, database]), 'enter');
 
-    expect(state.answers[0]).toEqual({ questionId: 'auth-provider', picked: ['google'], text: '', skipped: false });
+    expect(state.answers[0]).toEqual(answered('auth-provider', ['google']));
     expect(state.screen).toBe(1);
   });
 
   it('picks an option by its number', () => {
     const state = press(startAsk([provider]), '2');
 
-    expect(send(state)).toEqual({ answers: [{ questionId: 'auth-provider', picked: ['okta'], text: '', skipped: false }] });
+    expect(send(state)).toEqual({ answers: [answered('auth-provider', ['okta'])] });
   });
 
   it('toggles the options of a multi question and confirms them with Enter', () => {
@@ -89,7 +98,7 @@ describe('the question tool', () => {
 
     expect(toggled.picked).toEqual(['export']);
     expect(toggled.screen).toBe(0);
-    expect(send(toggled)).toEqual({ answers: [{ questionId: 'features', picked: ['export'], text: '', skipped: false }] });
+    expect(send(toggled)).toEqual({ answers: [answered('features', ['export'])] });
   });
 
   it('types a free answer after Other…', () => {
@@ -97,44 +106,40 @@ describe('the question tool', () => {
 
     expect(typed.typing).toBe(true);
     expect(typed.text).toBe('auth');
-    expect(send(typed)).toEqual({ answers: [{ questionId: 'auth-provider', picked: [], text: 'auth', skipped: false }] });
+    expect(send(typed)).toEqual({ answers: [answered('auth-provider', [], 'auth')] });
   });
 
   it('leaves typing with Esc, keeping the choices one key away', () => {
     const state = type(startAsk([provider]), ['o', 'x', 'esc']);
 
     expect(state.typing).toBe(false);
-    expect(send(type(state, ['2']))).toEqual({ answers: [{ questionId: 'auth-provider', picked: ['okta'], text: '', skipped: false }] });
+    expect(send(type(state, ['2']))).toEqual({ answers: [answered('auth-provider', ['okta'])] });
   });
 
   it('types straight into a text question', () => {
     const state = startAsk([notes]);
 
     expect(state.typing).toBe(true);
-    expect(send(type(state, ['n', 'o', 'n', 'e']))).toEqual({ answers: [{ questionId: 'notes', picked: [], text: 'none', skipped: false }] });
+    expect(send(type(state, ['n', 'o', 'n', 'e']))).toEqual({ answers: [answered('notes', [], 'none')] });
   });
 
   it('answers a confirm question with yes on Enter and no on 2', () => {
-    expect(send(type(startAsk([understanding]), ['enter']))).toEqual({
-      answers: [{ questionId: 'understanding', picked: ['yes'], text: '', skipped: false }],
-    });
-    expect(send(type(startAsk([understanding]), ['2']))).toEqual({
-      answers: [{ questionId: 'understanding', picked: ['no'], text: '', skipped: false }],
-    });
+    expect(send(type(startAsk([understanding]), ['enter']))).toEqual({ answers: [answered('understanding', ['yes'])] });
+    expect(send(type(startAsk([understanding]), ['2']))).toEqual({ answers: [answered('understanding', ['no'])] });
   });
 
   it('goes Back with the earlier answers kept', () => {
-    const answered = type(startAsk([provider, database]), ['enter']);
-    const back = press(answered, 'b');
+    const firstAnswer = type(startAsk([provider, database]), ['enter']);
+    const back = press(firstAnswer, 'b');
 
     expect(back.screen).toBe(0);
-    expect(back.answers[0]).toEqual({ questionId: 'auth-provider', picked: ['google'], text: '', skipped: false });
+    expect(back.answers[0]).toEqual(answered('auth-provider', ['google']));
     expect(render(back, 80)).toContain('> 1  Google Workspace  (recommended)');
 
     // The earlier answer is still there when the person walks forward again.
     const forward = press(back, 'enter');
     expect(forward.screen).toBe(1);
-    expect(forward.answers[0]).toEqual({ questionId: 'auth-provider', picked: ['google'], text: '', skipped: false });
+    expect(forward.answers[0]).toEqual(answered('auth-provider', ['google']));
   });
 
   it('does nothing on Back at the first question', () => {
@@ -146,23 +151,27 @@ describe('the question tool', () => {
 
   it('skips a question', () => {
     expect(send(type(startAsk([provider, database]), ['s', 'enter']))).toEqual({
-      answers: [
-        { questionId: 'auth-provider', picked: [], text: '', skipped: true },
-        { questionId: 'db', picked: ['postgres'], text: '', skipped: false },
-      ],
+      answers: [skipped('auth-provider'), answered('db', ['postgres'])],
     });
   });
 
   it('sends every question, in order, from the summary', () => {
-    const state = type(startAsk([provider, features, notes, understanding]), ['enter', '2', 'enter', 'k', 'enter', 'enter']);
+    const state = type(startAsk([provider, features, notes, understanding]), [
+      'enter',
+      '2',
+      'enter',
+      'k',
+      'enter',
+      'enter',
+    ]);
 
     expect(state.screen).toBe(4);
     expect(send(state)).toEqual({
       answers: [
-        { questionId: 'auth-provider', picked: ['google'], text: '', skipped: false },
-        { questionId: 'features', picked: ['export'], text: '', skipped: false },
-        { questionId: 'notes', picked: [], text: 'k', skipped: false },
-        { questionId: 'understanding', picked: ['yes'], text: '', skipped: false },
+        answered('auth-provider', ['google']),
+        answered('features', ['export']),
+        answered('notes', [], 'k'),
+        answered('understanding', ['yes']),
       ],
     });
   });
@@ -171,9 +180,7 @@ describe('the question tool', () => {
     const summary = type(startAsk([provider]), ['enter']);
 
     expect(result(summary)).toBeNull();
-    expect(result(press(summary, 'enter'))).toEqual({
-      answers: [{ questionId: 'auth-provider', picked: ['google'], text: '', skipped: false }],
-    });
+    expect(result(press(summary, 'enter'))).toEqual({ answers: [answered('auth-provider', ['google'])] });
   });
 
   it('ignores keys after Send', () => {
@@ -230,7 +237,13 @@ describe('the question card', () => {
     expect(multi).toContain('  [ ] 2  Export');
     expect(multi.join('\n')).toContain('Other…');
 
-    const closed = question({ id: 'closed', title: 'Pick one', kind: 'single', options: [{ id: 'a', label: 'A' }], allowOther: false });
+    const closed = question({
+      id: 'closed',
+      title: 'Pick one',
+      kind: 'single',
+      options: [{ id: 'a', label: 'A' }],
+      allowOther: false,
+    });
     expect(render(startAsk([closed]), 80).join('\n')).not.toContain('Other…');
   });
 

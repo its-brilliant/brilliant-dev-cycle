@@ -73,7 +73,10 @@ export async function runChat(options: ChatOptions): Promise<number> {
     }
   })();
 
-  /** The next key, or null when the person interrupted or the input ended. A card owns the keys, so it waits for them alone. */
+  /**
+   * The next key, or null when the person interrupted or the input ended. A card owns the keys, so
+   * it waits for them alone.
+   */
   const nextKey = async (): Promise<string | null> => {
     for (;;) {
       if (session.stopped) return null;
@@ -138,7 +141,8 @@ export async function runChat(options: ChatOptions): Promise<number> {
     const answers = await askQuestions(ask.questions);
     if (answers === null) return 0;
     // An intake round answers the PM's turn; a scoped ask answers the phase or agent that asked.
-    const event = ask.scope === null ? { type: 'ROUND_ANSWERED', answers } : { type: 'ANSWER', askId: ask.askId, answers };
+    const event =
+      ask.scope === null ? { type: 'ROUND_ANSWERED', answers } : { type: 'ANSWER', askId: ask.askId, answers };
     return (await send(event)) ? null : 1;
   };
 

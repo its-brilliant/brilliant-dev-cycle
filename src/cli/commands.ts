@@ -94,7 +94,15 @@ export async function chat(args: string[], io: CliIO): Promise<number> {
   const client = await connectToDaemon(dir);
   const terminal = streamTerminal();
   try {
-    return await runChat({ client, runId, out: io.out, err: io.err, terminal, columns: process.stdout.columns, signal: io.signal });
+    return await runChat({
+      client,
+      runId,
+      out: io.out,
+      err: io.err,
+      terminal,
+      columns: process.stdout.columns,
+      signal: io.signal,
+    });
   } finally {
     terminal.close();
     client.close();
@@ -112,7 +120,8 @@ export async function say(args: string[], _io: CliIO): Promise<number> {
 
   const client = await connectToDaemon(dir);
   try {
-    const response = await client.request({ id: newRequestId(), type: 'send', runId, event: { type: 'MESSAGE', text } });
+    const event = { type: 'MESSAGE', text };
+    const response = await client.request({ id: newRequestId(), type: 'send', runId, event });
     if (!response.ok) throw new Error(`the daemon refused the message: ${response.error}`);
     return 0;
   } finally {
