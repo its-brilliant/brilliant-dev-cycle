@@ -8,6 +8,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
+import { serveMcp } from '../agents/mcp-server.js';
+import { envFromProcess, isSubmitKind, submit as submitToInbox } from '../agents/submit.js';
+import { SUBMIT_TOOLS } from '../contracts/actors.js';
 import { ProjectConfig } from '../contracts/domain.js';
 import { connect, ensureDaemon, newRequestId, type DaemonClient } from '../daemon/client.js';
 import { latestRunId, projectPaths } from '../daemon/paths.js';
@@ -32,9 +35,13 @@ export const USAGE = `usage:
   bdc status <dir> [--run <id>]
   bdc runs <dir>
   bdc watch <dir> [--run <id>]
+  bdc mcp
+  bdc submit <kind> [json | --file <path>]
 
 Starts runs and the project daemon, sends person events and prints run views (spec §7.2).
-Without --run a command uses the project's latest run.`;
+Without --run a command uses the project's latest run.
+\`bdc mcp\` is the MCP server bdc attaches to an agent, and \`bdc submit\` the same submission for
+a CLI without MCP; both read the AGENT_ENV bdc starts the agent with, so they only work inside a job.`;
 
 /** What `bdc start` prints when the project has no `bdc.yaml` yet. */
 const EXAMPLE_CONFIG = `agents:
@@ -169,6 +176,68 @@ export async function daemon(args: string[], io: CliIO): Promise<number> {
   } finally {
     await server.stopDaemon();
     runs.stop();
+  }
+}
+
+/** `bdc mcp`: the job's MCP server over stdio, until the agent CLI closes the pipe (§3.4). */
+export async function mcp(args: string[]): Promise<number> {
+  const { positional } = parseArgs(args, []);
+  if (positional.length > 0) throw new UsageError('mcp takes no arguments');
+  await serveMcp(envFromProcess());
+  return 0;
+}
+
+/**
+ * `bdc submit <kind> [json | --file <path>]`, stdin when neither: the same `submit` the MCP tool calls,
+ * for a CLI without MCP and for tests. It answers with the new entry's seq or with the problems.
+ */
+export async function submit(args: string[], io: CliIO): Promise<number> {
+  const { positional, flags } = parseArgs(args, ['file']);
+  if (positional.length > 2) throw new UsageError('submit takes a submission kind and at most one JSON payload');
+  const kind = positional[0];
+  if (kind === undefined) throw new UsageError(`submit needs a submission kind (${Object.keys(SUBMIT_TOOLS).join(', ')})`);
+  if (!isSubmitKind(kind)) {
+    throw new UsageError(`submit does not know the kind "${kind}"; it takes ${Object.keys(SUBMIT_TOOLS).join(', ')}`);
+  }
+  if (flags.file !== undefined && positional[1] !== undefined) {
+    throw new UsageError('submit takes the payload as JSON or from --file, not both');
+  }
+  const env = envFromProcess();
+  // One tool per job: a submission of another kind would reach the job's observer as the wrong event.
+  if (env.kind !== kind) throw new Error(`this job submits ${env.kind}, not ${kind}`);
+
+  const read = readSubmission(flags.file, positional[1], io);
+  if (!read.ok) return 1;
+  const result = submitToInbox(env, read.payload);
+  if (!result.ok) {
+    io.err(`bdc: the submission was rejected:\n${result.problems.map((problem) => `  ${problem}`).join('\n')}\n`);
+    return 1;
+  }
+  io.out(`submitted #${result.seq}\n`);
+  return 0;
+}
+
+/** The submission bdc reads: `ok` false means it was unreadable or not JSON, and `io` says why. */
+interface ReadSubmission {
+  ok: boolean;
+  payload: unknown;
+}
+
+/** The submission from `--file`, the JSON argument, or stdin. */
+function readSubmission(file: string | undefined, json: string | undefined, io: CliIO): ReadSubmission {
+  const from = file !== undefined ? 'file' : json !== undefined ? 'the argument' : 'stdin';
+  let text: string;
+  try {
+    text = file !== undefined ? fs.readFileSync(file, 'utf8') : (json ?? fs.readFileSync(0, 'utf8'));
+  } catch (error) {
+    io.err(`bdc: cannot read the submission from ${from}: ${message(error)}\n`);
+    return { ok: false, payload: undefined };
+  }
+  try {
+    return { ok: true, payload: JSON.parse(text) };
+  } catch (error) {
+    io.err(`bdc: the submission from ${from} is not JSON: ${message(error)}\n`);
+    return { ok: false, payload: undefined };
   }
 }
 
