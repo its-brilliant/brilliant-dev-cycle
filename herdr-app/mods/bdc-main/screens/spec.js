@@ -169,12 +169,13 @@ function blockRow(t, ctx, block, comments, readOnly) {
 /** The block's text, split around the quotes its comments anchor to so each quote gets a background. */
 function blockParts(t, block, segments) {
   const parts = segments.filter((segment) => segment.text !== "");
-  if (parts.length <= 1) return [TextView.markdown(`bdc-spec-${block.id}`, block.text)];
+  if (parts.length <= 1) return [TextView.markdown(`bdc-spec-${block.id}`, block.text).w_full()];
   return parts.map((segment, index) =>
     segment.commentId === null
-      ? TextView.markdown(`bdc-spec-${block.id}-${index}`, segment.text)
+      ? TextView.markdown(`bdc-spec-${block.id}-${index}`, segment.text).w_full()
       : div()
           .id(`bdc-spec-quote-${block.id}-${index}`)
+          .w_full()
           .rounded(3)
           .px(3)
           .bg(tint(t.colors.working, "2e"))

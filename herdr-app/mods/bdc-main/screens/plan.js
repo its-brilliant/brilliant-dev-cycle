@@ -151,7 +151,7 @@ function body(t, ctx, phases, readOnly) {
                 .relative()
                 .w(layout.width)
                 .h(layout.height)
-                .children(layout.edges.flatMap((edge, edgeIndex) => edge.segments.map((segment, segmentIndex) => edgeLine(t, edge, segment, edgeIndex, segmentIndex))))
+                .children(layout.edges.flatMap((edge, edgeIndex) => edge.segments.map((segment, segmentIndex) => edgeLine(t, segment, edgeIndex, segmentIndex))))
                 .children(layout.cards.map((card) => phaseCard(t, ctx, card))),
             ),
         ),
@@ -160,7 +160,7 @@ function body(t, ctx, phases, readOnly) {
 }
 
 /** One 1px piece of an edge: the lines that say which phase waits on which. */
-function edgeLine(t, edge, segment, edgeIndex, segmentIndex) {
+function edgeLine(t, segment, edgeIndex, segmentIndex) {
   return div()
     .id(`bdc-plan-edge-${edgeIndex}-${segmentIndex}`)
     .absolute()
