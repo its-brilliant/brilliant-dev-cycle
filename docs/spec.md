@@ -110,7 +110,7 @@ Every agent is started with bdc's MCP server attached (`bdc mcp`, stdio, scoped 
 
 | Tool | Roles | Does |
 |---|---|---|
-| `ask_user({ questions })` | PM only | ✅ **The question tool.** Asks you one or more structured questions (below) and **blocks until you answer** in the UI; returns your answers. |
+| `ask_user({ questions })` | PM only | ✅ **The question tool.** Hands you one or more structured questions (below) and returns at once; the PM ends its turn, and **your answers arrive as its next message** when you have answered in the UI. (Not a blocking call, so a PM waiting hours on you never hits a tool timeout, and a daemon restart while you think loses nothing.) |
 | `submit_brief`, `reply`, `decide`, `propose` | PM | the intake brief, a chat reply, a decision on a blocked phase (§6), a proposed action (Apply / Discard) |
 | `submit_spec` | spec writer | the spec markdown, plus per-comment notes on what changed |
 | `submit_plan` | planner | the phase plan; validated (schema, cycles, disjoint task paths, proof per phase) |
