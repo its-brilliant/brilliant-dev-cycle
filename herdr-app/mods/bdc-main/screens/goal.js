@@ -8,7 +8,9 @@ export function render(_view, ctx) {
   const t = ctx.t;
   const state = ctx.state;
   const input = ctx.inputs.goal;
-  const typed = input.value().trim();
+  // The typed goal lives in this screen's state (main reads the input's change event), so the
+  // render reads plain data and never calls into Herdr.
+  const typed = (state.text ?? "").trim();
   const starting = state.starting === true;
   return v_flex()
     .id("bdc-goal")
@@ -44,11 +46,11 @@ export function render(_view, ctx) {
         .when(starting, (row) => row.child(t.label("Creating the run…", { color: t.colors.dim })))
         .when(state.error !== undefined && state.error !== "", (row) => row.child(div().text_size(t.type.small).text_color(t.colors.blocked).child(state.error))),
     )
-    .child(t.label("Enter starts too, once the box has a goal and the keyboard is in it.", { color: t.colors.dim, size: t.type.small }));
+    .child(t.label("Start creates the run; the PM takes it from there, here and in PM chat.", { color: t.colors.dim, size: t.type.small }));
 }
 
 function start(ctx, cx) {
-  const goal = ctx.inputs.goal.value().trim();
+  const goal = (ctx.state.text ?? "").trim();
   if (goal === "" || ctx.state.starting === true) return;
   ctx.setState({ starting: true, error: "" }, cx);
   cx.spawn(async (asyncCx) => {

@@ -86,6 +86,9 @@ export default class BdcMain extends View {
     this.state = {};
     /** InputStates, made in `init` because Herdr only makes them in a host call. */
     this.inputs = { goal: InputState.new({ placeholder: "What do you want built?" }) };
+    // The goal screen reads the typed goal from its state, not from the input, so its render
+    // makes no host call: the change event is where the value is read.
+    this.inputs.goal.on("change", (_event, inputCx) => this.setGoal(this.inputs.goal.value(), inputCx));
     this.follow = true;
     this.error = "";
     this.confirmingCancel = false;
@@ -168,6 +171,12 @@ export default class BdcMain extends View {
     this.inputs[name] = created;
     if (cx) cx.notify();
     return created;
+  }
+
+  /** The goal screen's text, kept in that screen's state so its render reads plain data. */
+  setGoal(text, cx) {
+    this.state.goal = { ...this.state.goal, text };
+    if (cx) cx.notify();
   }
 
   // ── render ────────────────────────────────────────────────────────────────────────────────
@@ -279,6 +288,8 @@ export default class BdcMain extends View {
     const wanted = stageScreen(view);
     if (this.open.screen === wanted && !this.open.readOnly) return null;
     const label = STEPS[stepOf(view.stage)] ?? view.stageWords;
+    // A secondary screen goes back to the stage; an earlier stage the person opened goes forward to it.
+    const secondary = this.open.screen === "reviews" || this.open.screen === "phase";
     return h_flex()
       .id("bdc-banner")
       .flex_none()
@@ -289,7 +300,7 @@ export default class BdcMain extends View {
       .bg(t.colors.popover)
       .child(div().text_size(t.type.small).text_color(t.colors.muted).child(`The run is in ${view.stageWords}.`))
       .child(
-        t.button(`Go to ${label}`, { id: "bdc-go-stage" }).on_click((_event, cx) => {
+        t.button(`${secondary ? "Back to" : "Go to"} ${label}`, { id: "bdc-go-stage" }).on_click((_event, cx) => {
           this.follow = true;
           this.open = { screen: wanted, readOnly: false };
           cx.notify();

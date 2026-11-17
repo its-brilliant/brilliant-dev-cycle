@@ -30,6 +30,17 @@ function promptKey(prompt) {
   return `${prompt.agentKey}\u0000${prompt.prompt}`;
 }
 
+/** The keys that do something on the card now, in the question tool's own words (§9.1 rule 3). */
+function cardHint(question, state) {
+  if (state.typing) return "Type your answer, Enter to keep it, Esc to go back to the choices";
+  if (question.kind === "multi") return "1–9 to choose, Enter when you are done";
+  if (question.kind === "text") return "Enter to type your answer";
+  const parts = ["1–9 to pick"];
+  if (question.kind === "confirm" || question.recommended !== undefined) parts.push("Enter for the recommended");
+  if (question.allowOther) parts.push("o to type your own answer");
+  return parts.join(", ");
+}
+
 export default class BdcPm extends View {
   init(_props, cx) {
     this.bdc = bdcCommands(host, BDC);
@@ -237,13 +248,13 @@ export default class BdcPm extends View {
       .child(
         h_flex()
           .flex_none()
-          .w(22)
+          .w(26)
           .h(22)
           .items_center()
           .justify_center()
           .rounded(6)
           .bg(mine ? t.colors.accent : t.colors.raised)
-          .child(div().text_size(t.type.tiny).text_color(mine ? t.colors.accentFg : t.colors.muted).child(mine ? "You" : "PM")),
+          .child(div().text_size(9.5).text_color(mine ? t.colors.accentFg : t.colors.muted).child(mine ? "You" : "PM")),
       )
       .child(
         v_flex()
@@ -298,10 +309,10 @@ export default class BdcPm extends View {
       .gap(7)
       .child(div().text_size(t.type.small).text_color(t.colors.muted).child(finished ? "Here are your answers" : "Question"))
       .child(div().flex_1())
-      .child(div().text_size(t.type.tiny).text_color(t.colors.dim).child(finished ? "Send" : `${state.screen + 1} of ${state.questions.length}`));
+      .child(div().text_size(t.type.tiny).text_color(t.colors.dim).child(finished ? "Review" : `${state.screen + 1} of ${state.questions.length}`));
 
     const rows = finished ? state.questions.map((item, index) => this.summaryRow(t, item, state.answers[index] ?? null)) : this.questionRows(t, state, question);
-    const footer = finished ? this.summaryFooter(t) : this.questionFooter(t, state);
+    const footer = finished ? this.summaryFooter(t) : this.questionFooter(t, state, question);
 
     return v_flex()
       .id("pm-question")
@@ -329,12 +340,7 @@ export default class BdcPm extends View {
     const rows = [div().text_size(13).text_color(t.colors.fg).child(question.title)];
     if (question.body.trim() !== "") rows.push(div().text_size(t.type.ui).text_color(t.colors.muted).child(question.body));
     if (state.typing) {
-      rows.push(
-        v_flex()
-          .gap(4)
-          .child(div().text_size(t.type.ui).text_color(t.colors.fg).child(`Your answer: ${state.text}`))
-          .child(div().text_size(t.type.tiny).text_color(t.colors.dim).child("Enter to keep it, Esc to go back to the choices")),
-      );
+      rows.push(div().text_size(t.type.ui).text_color(t.colors.fg).child(`Your answer: ${state.text}`));
       return rows;
     }
     const options = optionsOf(question);
@@ -388,13 +394,13 @@ export default class BdcPm extends View {
     return withHint;
   }
 
-  questionFooter(t, state) {
+  questionFooter(t, state, question) {
     const row = h_flex().gap(8).items_center();
     // Back is only there when there is a question behind this one (§9.1 rule 3).
     if (state.screen > 0) row.child(t.button("Back", { id: "pm-back" }).on_click((_event, cx) => this.pressCard(BACK, cx)));
     row.child(t.button("Skip", { id: "pm-skip" }).on_click((_event, cx) => this.pressCard(SKIP, cx)));
     row.child(div().flex_1());
-    row.child(div().text_size(t.type.tiny).text_color(t.colors.dim).child("1–9 to pick, Enter for the recommended"));
+    row.child(div().text_size(t.type.tiny).text_color(t.colors.dim).child(cardHint(question, state)));
     return row;
   }
 
@@ -430,6 +436,7 @@ export default class BdcPm extends View {
       .child(
         h_flex()
           .gap(6)
+          .flex_wrap()
           .children(
             prompt.choices.map((choice, index) =>
               t.button(choice, { id: `pm-prompt-${prompt.agentKey}-${index}` }).on_click((_event, cx) => this.choose(prompt, choice, cx)),

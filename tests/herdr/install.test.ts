@@ -66,6 +66,13 @@ function install(): ReturnType<typeof installHerdr> {
   return installHerdr({ repoRoot: checkout, env, node: NODE });
 }
 
+/** What one installed mod folder must hold: the repo's mod files, the kit, and the two generated files. */
+function expectedModTree(name: string): string[] {
+  const modFiles = tree(path.join(checkout, 'herdr-app', 'mods', name));
+  const kitFiles = tree(path.join(checkout, 'herdr-app', 'kit')).map((file) => `kit/${file}`);
+  return [...modFiles, ...kitFiles, 'kit/bdc-command.js', 'kit/question-tool.js'].sort();
+}
+
 describe('where things go', () => {
   it('uses HERDR_APP_HOME, or ~/.config/herdr-app, and the person’s ~/.local/bin for the wrapper', () => {
     expect(herdrPaths({ HERDR_APP_HOME: '/apps/herdr', HOME: '/home/someone' })).toEqual({
@@ -87,26 +94,15 @@ describe('install', () => {
     const result = install();
 
     expect(fs.readdirSync(path.join(home, 'mods')).sort()).toEqual(['bdc-main', 'bdc-pm']);
-    expect(tree(path.join(home, 'mods', 'bdc-main'))).toEqual(
-      expect.arrayContaining([
-        'main.js',
-        'mod.json',
-        'screens/goal.js',
-        'screens/build.js',
-        'screens/ended.js',
-        'kit/bdc.js',
-        'kit/project.js',
-        'kit/view.js',
-        'kit/look.js',
-        'kit/words.js',
-        'kit/host.js',
-        'kit/bdc-command.js',
-        'kit/question-tool.js',
-      ]),
-    );
-    expect(tree(path.join(home, 'mods', 'bdc-pm'))).toEqual(
-      expect.arrayContaining(['main.js', 'mod.json', 'kit/bdc.js', 'kit/bdc-command.js', 'kit/question-tool.js']),
-    );
+    expect(tree(path.join(home, 'mods', 'bdc-main'))).toEqual(expectedModTree('bdc-main'));
+    expect(tree(path.join(home, 'mods', 'bdc-pm'))).toEqual(expectedModTree('bdc-pm'));
+    // Nothing else lands in the person's Herdr home.
+    expect(tree(home)).toEqual([
+      'layouts/bdc.json',
+      'layouts/bdc.svg',
+      ...expectedModTree('bdc-main').map((file) => `mods/bdc-main/${file}`),
+      ...expectedModTree('bdc-pm').map((file) => `mods/bdc-pm/${file}`),
+    ]);
     // The mod folders' own files are the repo's files, byte for byte.
     expect(fs.readFileSync(path.join(home, 'mods', 'bdc-main', 'main.js'), 'utf8')).toBe(
       fs.readFileSync(path.join(checkout, 'herdr-app', 'mods', 'bdc-main', 'main.js'), 'utf8'),
