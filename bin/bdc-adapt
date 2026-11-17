@@ -1,0 +1,20 @@
+#!/bin/sh
+# bdc-adapt: the launch marker every bdc agent terminal goes through (spec §3.2).
+#
+# hc reads OSC 7501 status from the terminal, so this reports `working` with app=bdc before the
+# agent CLI starts and `done`/`blocked` when it ends. The agent's own statuses come from the CLI
+# itself; the agent machine ignores app=bdc, so this marker cannot make an agent look busy or
+# finished (the v1 pi bug). Usage: bdc-adapt <cli> [args...]
+if [ "$#" -eq 0 ]; then
+  echo "usage: bdc-adapt <cli> [args...]" >&2
+  exit 2
+fi
+printf '\033]7501;state=working:app=bdc\033\\'
+"$@"
+code=$?
+if [ "$code" -eq 0 ]; then
+  printf '\033]7501;state=done:app=bdc\033\\'
+else
+  printf '\033]7501;state=blocked:app=bdc\033\\'
+fi
+exit "$code"
