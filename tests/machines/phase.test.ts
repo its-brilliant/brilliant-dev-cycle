@@ -401,6 +401,42 @@ describe('phaseMachine', () => {
     await h.at('merging');
   });
 
+  /** Real effects reject (git refuses, a command cannot start); the phase must never just wait. */
+  it('an effect that fails sends the phase to the PM with what failed', async () => {
+    const h = harness({
+      merge: () => {
+        throw new Error('fatal: Unable to create index.lock: File exists');
+      },
+    });
+    await h.at('building');
+    await h.until(() => h.agentIds().length === 2, 'builders');
+    h.done('builder-t1');
+    h.done('builder-t2');
+    await h.at('deciding');
+    expect(h.needsPm()[0]?.blocker).toEqual({
+      kind: 'conflict',
+      summary: 'merging the task branches failed: fatal: Unable to create index.lock: File exists',
+      evidence: ['fatal: Unable to create index.lock: File exists'],
+    });
+  });
+
+  it('verification that cannot start sends the phase to the PM instead of hanging', async () => {
+    const h = harness({
+      verify: () => {
+        throw new Error('spawn sh ENOENT');
+      },
+    });
+    await toReviewing(h);
+    h.done('reviewer-security-1', { findings: [] });
+    await h.at('queuedForVerify');
+    h.send({ type: 'VERIFY_SLOT_GRANTED', slot: 0 });
+    await h.at('deciding');
+    expect(h.needsPm()[0]?.blocker.kind).toBe('verify-setup');
+    expect(h.needsPm()[0]?.blocker.summary).toContain('spawn sh ENOENT');
+    // The slot is given back on the way out, as after any verification.
+    expect(h.sent('PHASE_VERIFY_SLOT_RELEASE')).toHaveLength(1);
+  });
+
   it('a phase branch that cannot merge into the run branch goes to the PM as a conflict', async () => {
     const h = harness({
       merge: (merge) =>

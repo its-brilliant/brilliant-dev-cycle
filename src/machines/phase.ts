@@ -499,6 +499,17 @@ export const phaseMachine = setup({
         return context.tasks.map((candidate) => (candidate.id === task.id ? { ...candidate, status } : candidate));
       },
     }),
+    /**
+     * An effect failed (git refused, a command could not start): never leave the phase waiting on an
+     * answer that will not come. It goes to the PM with what failed, like any other blocker.
+     */
+    blockOnEffectError: assign({
+      blocker: ({ event }, params: { kind: Blocker['kind']; what: string }) => {
+        const error = (event as { error?: unknown }).error;
+        const message = error instanceof Error ? error.message : String(error ?? 'unknown error');
+        return { kind: params.kind, summary: `${params.what} failed: ${message}`, evidence: [message] };
+      },
+    }),
     blockOnBuild: assign({
       blocker: ({ context, event }) => {
         const result = asAgentResult(event);
@@ -888,6 +899,7 @@ export const phaseMachine = setup({
           { guard: 'moreEnsuresAfterThis', target: 'building', reenter: true, actions: 'recordEnsure' },
           { actions: 'recordEnsure' },
         ],
+        onError: { target: 'deciding', actions: { type: 'blockOnEffectError', params: { kind: 'build', what: 'setting up the worktrees' } } },
       },
       always: [
         { guard: 'buildersPending', actions: 'spawnBuilders' },
@@ -911,6 +923,7 @@ export const phaseMachine = setup({
           { guard: 'moreMergesAfterThis', target: 'merging', reenter: true, actions: 'recordMerge' },
           { target: 'reviewing', actions: 'recordMerge' },
         ],
+        onError: { target: 'deciding', actions: { type: 'blockOnEffectError', params: { kind: 'conflict', what: 'merging the task branches' } } },
       },
     },
 
@@ -960,6 +973,7 @@ export const phaseMachine = setup({
           { guard: 'failedAtSetup', target: 'deciding', actions: ['recordVerification', 'blockOnVerifySetup'] },
           { target: 'deciding', actions: ['recordVerification', 'blockOnVerify'] },
         ],
+        onError: { target: 'deciding', actions: { type: 'blockOnEffectError', params: { kind: 'verify-setup', what: 'running the verification' } } },
       },
     },
 
@@ -975,6 +989,7 @@ export const phaseMachine = setup({
           { guard: 'proofAwaitingVerifier' },
           { target: 'deciding', actions: 'blockOnProof' },
         ],
+        onError: { target: 'deciding', actions: { type: 'blockOnEffectError', params: { kind: 'proof', what: 'checking the proof' } } },
       },
       always: [{ guard: 'verifierPending', actions: 'spawnVerifier' }],
       on: {
@@ -1025,6 +1040,7 @@ export const phaseMachine = setup({
           { guard: 'moreFixProbesAfterThis', target: 'fixing', reenter: true, actions: ['recordTaskCommits', 'chooseFixBuilder'] },
           { actions: ['recordTaskCommits', 'chooseFixBuilder'] },
         ],
+        onError: { target: 'deciding', actions: { type: 'blockOnEffectError', params: { kind: 'build', what: 'reading the task commits' } } },
       },
       // Once the probes have named a builder (or the PM named one itself), the instructions go in.
       always: [{ guard: 'fixBuilderReady', actions: 'sendFixFollowUp' }],
@@ -1054,6 +1070,7 @@ export const phaseMachine = setup({
           { guard: 'runMergeConflicted', target: 'deciding', actions: 'blockOnConflict' },
           { target: 'done', actions: ['closeChildren', 'sendDone'] },
         ],
+        onError: { target: 'deciding', actions: { type: 'blockOnEffectError', params: { kind: 'conflict', what: 'merging the phase into the run branch' } } },
       },
     },
 
