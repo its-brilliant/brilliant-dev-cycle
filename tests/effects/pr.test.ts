@@ -349,7 +349,7 @@ describe('the GitHub target', () => {
 
     // The run branch first, never forced, and the proof branch after it.
     expect(git[0]).toEqual(['push', '-u', 'origin', 'bdc/r-1']);
-    expect(git).toContainEqual(['push', 'origin', `${'c'.repeat(40)}:refs/heads/bdc/proof/r-1`]);
+    expect(git).toContainEqual(['push', 'origin', 'bdc/proof/r-1']);
     expect(calls.some((call) => call.args.includes('--force') || call.args.includes('-f'))).toBe(false);
 
     // One pull request, from the run branch into the base branch, as a draft, with a body file.
@@ -362,6 +362,8 @@ describe('the GitHub target', () => {
     expect(create).toContain('--draft');
     expect(create?.[create.indexOf('--repo') + 1]).toBe('its-brilliant/brilliant-dev-cycle');
     expect(gh.filter((args) => args[1] === 'create')).toHaveLength(1);
+    // In order: is there a PR already, create it, then one comment.
+    expect(gh.map((args) => args[1])).toEqual(['view', 'create', 'comment']);
 
     // One comment, for the phase with a picture, linking the proof branch.
     const comments = calls.filter((call) => call.command === 'gh' && call.args[1] === 'comment');
@@ -463,9 +465,9 @@ describe('the GitHub target', () => {
       return undefined;
     });
 
-    await expect(open(prEffect({ run }), input(root, [{ provider: 'github', draft: true }]))).rejects.toThrow(
-      /gh pr create .* failed \(exit 1\): a pull request already exists/,
-    );
+    await expect(
+      open(prEffect({ run }), input(root, [{ provider: 'github', repo: 'its-brilliant/bdc', draft: true }])),
+    ).rejects.toThrow(/gh pr create .* failed \(exit 1\): a pull request already exists/);
   });
 
   it('reads owner/name out of the remote URLs people have', () => {

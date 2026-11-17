@@ -22,7 +22,7 @@ import type { PromiseActorLogic } from 'xstate';
 import { z } from 'zod';
 import { RunView, type FindingView, type PhaseView } from '../contracts/view.js';
 import type { OpenPullRequestInput, OpenPullRequestOutput } from '../machines/run.js';
-import { gitCall, gitText, outputTail, runProcess, type GitContext, type RunCommand } from './git.js';
+import { gitCall, gitText, outputTail, refBranch, runProcess, type GitContext, type RunCommand } from './git.js';
 
 // ── the body ──────────────────────────────────────────────────────────────────────────────
 
@@ -281,7 +281,8 @@ function writeFileTarget(input: OpenPullRequestInput, run: RunData, relative: st
   const body = pullRequestBody(run.view, {
     base: run.base,
     runBranch: input.runBranch,
-    draft: input.draft,
+    // A file is neither a draft nor ready: that choice belongs to the pull request itself.
+    draft: false,
     proofHref: (proof) => {
       const found = files.find((candidate) => candidate.item.file === proof)?.found;
       return found == null ? null : path.relative(dir, found);
@@ -406,8 +407,8 @@ async function publishProof(
     const commitArgs = ['commit-tree', tree, '-m', `bdc: proof for ${input.runId}`];
     if (parent !== null) commitArgs.push('-p', parent);
     const commit = (await gitText(ctx, input.root, commitArgs)).trim();
-    await gitText(ctx, input.root, ['push', 'origin', `${commit}:refs/heads/${branch}`]);
     await gitText(ctx, input.root, ['update-ref', `refs/heads/${branch}`, commit]);
+    await gitText(ctx, input.root, ['push', 'origin', branch]);
     for (const { file, dest } of placed) {
       published.set(file, `https://github.com/${repo}/blob/${branch}/${dest}?raw=true`);
     }
@@ -435,12 +436,20 @@ function commentBody(phase: PhaseView, published: Map<string, string>): string {
 }
 
 async function openGithubTarget(ctx: PrContext, input: OpenPullRequestInput, run: RunData, target: GithubTarget): Promise<string> {
+  const branch = refBranch(input.runBranch);
   // The run branch first: a pull request needs it on the remote. Never forced: a push that is not a
   // fast-forward is somebody else's work, and bdc says so instead of overwriting it.
-  await gitText(ctx, input.root, ['push', '-u', 'origin', input.runBranch]);
+  await gitText(ctx, input.root, ['push', '-u', 'origin', branch]);
 
   const repo = await githubRepo(ctx, input.root, target);
-  const existing = await existingPullRequest(ctx, input.root, input.runBranch);
+  const hasMedia = run.view.phases.some((phase) => phase.proof.some((item) => MEDIA_KINDS.includes(item.kind)));
+  if (hasMedia && repo === null) {
+    throw new Error(
+      'bdc cannot link the proof of this run: name the GitHub repository in the pull request target (repo: owner/name), or give the checkout an origin remote',
+    );
+  }
+
+  const existing = await existingPullRequest(ctx, input.root, branch);
   let url = existing;
   if (url === null) {
     const body = pullRequestBody(run.view, {
@@ -449,7 +458,7 @@ async function openGithubTarget(ctx: PrContext, input: OpenPullRequestInput, run
       draft: input.draft,
       // The body names the proof items; the pictures are in the phase comments below.
     });
-    const args = ['pr', 'create', '--base', run.base, '--head', input.runBranch, '--title', pullRequestTitle(run.view)];
+    const args = ['pr', 'create', '--base', run.base, '--head', branch, '--title', pullRequestTitle(run.view)];
     url = await withTempFile('body.md', body, async (file) => {
       const full = [...args, '--body-file', file];
       // The person's choice on the Ship screen (§4.6) decides draft or ready; the target's `draft`
@@ -460,19 +469,14 @@ async function openGithubTarget(ctx: PrContext, input: OpenPullRequestInput, run
     });
   }
 
-  const hasMedia = run.view.phases.some((phase) => phase.proof.some((item) => MEDIA_KINDS.includes(item.kind)));
-  if (hasMedia && repo === null) {
-    throw new Error(
-      'bdc cannot link the proof of this run: name the GitHub repository in the pull request target (repo: owner/name), or give the checkout an origin remote',
-    );
-  }
   const published = repo === null ? new Map<string, string>() : await publishProof(ctx, input, run, repo);
 
   for (const phase of run.view.phases) {
     if (!phase.proof.some((item) => MEDIA_KINDS.includes(item.kind))) continue;
-    await withTempFile(`comment-${phase.id}.md`, commentBody(phase, published), (file) =>
-      ghText(ctx, input.root, ['pr', 'comment', url, '--body-file', file]).then(() => undefined),
-    );
+    const body = commentBody(phase, published);
+    await withTempFile(`comment-${phase.id}.md`, body, async (file) => {
+      await ghText(ctx, input.root, ['pr', 'comment', url, '--body-file', file]);
+    });
   }
   return url;
 }
