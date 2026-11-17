@@ -62,7 +62,31 @@ interface CommandResult {
 /** `runVerification` (§7.4): setup → ready → checks → teardown, in the phase's worktree. */
 export function verifyEffect(options: VerifyOptions = {}): PromiseActorLogic<RunVerificationOutput, RunVerificationInput> {
   const portBase = options.portBase ?? DEFAULT_PORT_BASE;
-  return fromPromise(async ({ input }) => verify(input, portBase));
+  return fromPromise(async ({ input }) => {
+    try {
+      return await verify(input, portBase);
+    } catch (error) {
+      // A worktree that is gone, a full disk: the phase machine has no error branch for this
+      // invoke (src/machines/phase.ts), so a rejected promise would leave the phase waiting for a
+      // verification that will never finish. A failed setup step the PM can read is the honest
+      // answer, and the person still gets the message on the Phase screen (§6, §7.4).
+      return {
+        passed: false,
+        failedAt: 'setup',
+        steps: [
+          {
+            phase: 'setup',
+            name: 'bdc could not run the verification',
+            command: '',
+            exitCode: null,
+            durationMs: 0,
+            outputTail: `bdc: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        proofFiles: [],
+      };
+    }
+  });
 }
 
 async function verify(input: RunVerificationInput, portBase: number): Promise<RunVerificationOutput> {

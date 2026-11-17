@@ -268,4 +268,17 @@ describe('runVerification', () => {
     expect(output.steps.map((step) => step.phase)).toEqual(['check']);
     expect(output.proofFiles).toHaveLength(1);
   });
+
+  it('answers a failed setup instead of throwing when the worktree cannot be used', async () => {
+    const notADirectory = path.join(repo, 'not-a-directory');
+    fs.writeFileSync(notADirectory, '');
+
+    const output = await verify(input(path.join(notADirectory, 'worktree'), { extraChecks: [{ run: 'echo ok' }] }));
+
+    expect(output.passed).toBe(false);
+    expect(output.failedAt).toBe('setup');
+    expect(output.steps).toHaveLength(1);
+    expect(output.steps[0]?.outputTail).toMatch(/^bdc: /);
+    expect(output.proofFiles).toEqual([]);
+  });
 });
