@@ -145,73 +145,85 @@ function fieldInput(ctx, name, value, cx) {
 
 // ── agents ──────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * One role as one compact row: what it does, its CLI (a dropdown), its model. The "Same as PM" and
+ * "Same as builder" buttons are gone: with a dropdown per role they were extra clicks, not help.
+ */
 function roleCard(t, ctx, field, form, choices) {
   const chosen = form.roles[field.role] ?? { cli: "", model: "" };
   const editing = ctx.state.modelFor === field.role;
-  const rows = [
-    h_flex()
-      .gap(8)
-      .items_center()
-      .child(div().text_size(t.type.ui).font_semibold().text_color(t.colors.fg).child(field.label))
-      .child(div().flex_1())
-      .when(field.role !== "pm", (row) => row.child(t.button("Same as PM", { id: `bdc-setup-same-pm-${field.role}` }).on_click((_event, cx) => copyRole(ctx, field.role, "pm", cx))))
-      .when(field.role !== "builder", (row) => row.child(t.button("Same as builder", { id: `bdc-setup-same-builder-${field.role}` }).on_click((_event, cx) => copyRole(ctx, field.role, "builder", cx)))),
-    t.label(field.hint, { color: t.colors.dim, size: t.type.small }),
-  ];
-  if (choices === undefined) {
-    rows.push(t.label("Checking which CLIs are installed…", { color: t.colors.dim, size: t.type.small }));
-  } else {
-    rows.push(cliRow(t, ctx, field.role, chosen, choices, form));
-    rows.push(modelRow(t, ctx, field.role, chosen, editing));
-  }
-  return v_flex().gap(6).p(8).rounded(t.radii.chip).border(1).border_color(t.colors.border).bg(t.colors.canvas).children(rows);
-}
-
-/** The CLI choice: one chip per CLI Herdr knows, and the reason the ones that cannot be picked cannot. */
-function cliRow(t, ctx, role, chosen, choices, form) {
-  const refused = choices.filter((choice) => choiceReason(choice) !== "");
   return v_flex()
-    .gap(4)
+    .gap(6)
+    .py(8)
+    .border_b(1)
+    .border_color(t.colors.border)
     .child(
       h_flex()
-        .gap(6)
-        .flex_wrap()
+        .gap(12)
         .items_center()
-        .children(
-          choices.map((choice) => {
-            const reason = choiceReason(choice);
-            const selected = chosen.cli === choice.key;
-            const chip = h_flex()
-              .id(`bdc-setup-cli-${role}-${choice.key}`)
-              .h(24)
-              .px(8)
-              .gap(6)
-              .items_center()
-              .rounded(t.radii.pill)
-              .border(1)
-              .border_color(selected ? t.colors.accent : t.colors.input)
-              .bg(selected ? t.colors.selection : t.colors.bg)
-              .child(div().text_size(t.type.small).text_color(selected ? t.colors.fg : reason === "" ? t.colors.muted : t.colors.dim).child(choice.key));
-            if (reason !== "") return chip.tooltip(reason);
-            return chip.cursor_pointer().hover((style) => style.bg(t.colors.raised)).on_click((_event, cx) => chooseCli(ctx, role, choice.key, form, cx));
-          }),
-        ),
+        .child(
+          v_flex()
+            .flex_1()
+            .min_w(0)
+            .gap(2)
+            .child(div().text_size(t.type.ui).font_semibold().text_color(t.colors.fg).child(field.label))
+            .child(div().text_size(t.type.small).text_color(t.colors.dim).truncate().child(field.hint)),
+        )
+        .child(
+          choices === undefined
+            ? t.label("Checking which CLIs are installed…", { color: t.colors.dim, size: t.type.small, wrap: false })
+            : cliRow(t, ctx, field.role, chosen, choices, form),
+        )
+        .child(modelButton(t, ctx, field.role, chosen)),
     )
-    .when(refused.length > 0, (column) =>
-      column.child(t.label(refused.map((choice) => `${choice.key}: ${choiceReason(choice)}`).join(" · "), { color: t.colors.dim, size: t.type.tiny })),
-    );
+    .when(editing, (column) => column.child(modelRow(t, ctx, field.role, chosen, editing)));
+}
+
+/** The model on a small button: "default model" until the person picks one. */
+function modelButton(t, ctx, role, chosen) {
+  const words = chosen.model === "" ? "default model" : chosen.model;
+  return div()
+    .id(`bdc-setup-model-${role}`)
+    .w(170)
+    .h(28)
+    .px(10)
+    .flex()
+    .items_center()
+    .rounded(t.radii.input)
+    .border(1)
+    .border_color(t.colors.input)
+    .bg(t.colors.bg)
+    .cursor_pointer()
+    .hover((style) => style.bg(t.colors.raised))
+    .on_click((_event, cx) => openModel(ctx, role, chosen, cx))
+    .child(div().truncate().text_size(t.type.small).text_color(chosen.model === "" ? t.colors.dim : t.colors.fg).child(words));
+}
+
+/**
+ * The CLI choice as a dropdown: only the CLIs bdc can run (installed and supported). The others are
+ * one quiet line in the list, not a wall of disabled chips (Yoni, 17 Nov 2026: "should be a dropdown").
+ */
+function cliRow(t, ctx, role, chosen, choices, form) {
+  const pickable = choices.filter((choice) => choiceReason(choice) === "" && choice.installed !== false);
+  const others = choices.filter((choice) => choice.supported !== true).length;
+  return t.dropdown(`bdc-setup-cli-${role}`, {
+    value: chosen.cli,
+    choices: pickable.map((choice) => ({ key: choice.key, label: choice.name ?? choice.key })),
+    open: ctx.state.cliOpen === role,
+    placeholder: pickable.length === 0 ? "No supported CLI is installed" : "Choose a CLI",
+    note: others > 0 ? `bdc runs claude and pi for now; ${others} other agent CLI${others === 1 ? "" : "s"} on this Mac are not supported yet.` : "",
+    onToggle: (open, cx) => ctx.setState({ cliOpen: open ? role : "" }, cx),
+    onPick: (key, cx) => {
+      ctx.setState({ cliOpen: "" }, cx);
+      chooseCli(ctx, role, key, form, cx);
+    },
+  });
 }
 
 /** The model: the choice's own default until the person opens the field and types one. */
 function modelRow(t, ctx, role, chosen, editing) {
-  const words = chosen.model === "" ? "the CLI's default model" : chosen.model;
-  const row = h_flex()
-    .gap(8)
-    .items_center()
-    .child(div().text_size(t.type.small).text_color(chosen.model === "" ? t.colors.dim : t.colors.muted).child(words))
-    .child(t.button("Model…", { id: `bdc-setup-model-${role}` }).on_click((_event, cx) => openModel(ctx, role, chosen, cx)));
   const field = ctx.inputs["setup.model"];
-  if (!editing || field === undefined) return row;
+  if (!editing || field === undefined) return div();
   return v_flex()
     .gap(6)
     .child(
@@ -239,11 +251,6 @@ function chooseCli(ctx, role, cli, form, cx) {
   ctx.setState({ roles: { ...form.roles, [role]: { cli, model: form.roles[role]?.model ?? "" } } }, cx);
 }
 
-function copyRole(ctx, role, from, cx) {
-  const form = formOf(ctx);
-  const source = form.roles[from] ?? { cli: "", model: "" };
-  ctx.setState({ roles: { ...form.roles, [role]: { cli: source.cli, model: source.model } } }, cx);
-}
 
 function openModel(ctx, role, chosen, cx) {
   fieldInput(ctx, "setup.model", chosen.model, cx).focus();

@@ -5,7 +5,7 @@
 // light and dark themes instead of pinning one. Everything a screen draws comes from here: pills,
 // cards, buttons, section labels, and the tones that mean "waiting on you", "passed", "blocked".
 import { div } from 'gpui-kit';
-import { h_flex, v_flex } from 'gpui-base';
+import { Popup, h_flex, v_flex } from 'gpui-base';
 
 /** The design's own values, used where the theme has no name for the color. */
 const DESIGN = {
@@ -155,5 +155,59 @@ export function look(themeColors) {
     return wrap ? element : element.whitespace_nowrap().truncate();
   }
 
-  return { colors, radii: RADII, type: TYPE, space: SPACE, mono: MONO, pill, card, button, section, label };
+  /**
+   * A dropdown: the chosen value on a trigger, the options in a list under it. The screen owns
+   * whether it is open (its own state), so a pick closes it and the trigger toggles it.
+   * `options` are `{ key, label, hint? }`; `note` is one quiet line under the list (e.g. why some
+   * choices are not offered), instead of a wall of disabled choices.
+   */
+  function dropdown(id, options) {
+    const { value = '', choices = [], open = false, onToggle, onPick, placeholder = 'Choose…', note = '', width = 220 } = options;
+    const chosen = choices.find((choice) => choice.key === value);
+    const trigger = h_flex()
+      .id(`${id}-trigger`)
+      .w(width)
+      .h(28)
+      .px(10)
+      .gap(6)
+      .items_center()
+      .rounded(RADII.input)
+      .border(1)
+      .border_color(open ? colors.accent : colors.input)
+      .bg(colors.bg)
+      .cursor_pointer()
+      .hover((style) => style.bg(colors.raised))
+      .on_click((_event, cx) => onToggle?.(!open, cx))
+      .child(div().flex_1().min_w(0).truncate().text_size(TYPE.ui).text_color(chosen === undefined ? colors.dim : colors.fg).child(chosen?.label ?? placeholder))
+      .child(div().text_size(TYPE.tiny).text_color(colors.dim).child(open ? '▴' : '▾'));
+    const list = v_flex()
+      .w(width)
+      .mt(4)
+      .p(4)
+      .gap(2)
+      .rounded(RADII.input)
+      .border(1)
+      .border_color(colors.border)
+      .bg(colors.popover)
+      .shadow_md()
+      .children(
+        choices.map((choice) =>
+          v_flex()
+            .id(`${id}-option-${choice.key}`)
+            .px(8)
+            .py(5)
+            .rounded(RADII.chip)
+            .bg(choice.key === value ? colors.selection : colors.popover)
+            .cursor_pointer()
+            .hover((style) => style.bg(colors.raised))
+            .on_click((_event, cx) => onPick?.(choice.key, cx))
+            .child(div().text_size(TYPE.ui).text_color(colors.fg).child(choice.label))
+            .when(typeof choice.hint === 'string' && choice.hint !== '', (row) => row.child(div().text_size(TYPE.tiny).text_color(colors.dim).child(choice.hint))),
+        ),
+      )
+      .when(note !== '', (column) => column.child(div().px(8).pt(4).text_size(TYPE.tiny).text_color(colors.dim).child(note)));
+    return Popup.new(id, trigger).anchor('bottom_left').when(open, (popup) => popup.content(list));
+  }
+
+  return { colors, radii: RADII, type: TYPE, space: SPACE, mono: MONO, pill, card, button, section, label, dropdown };
 }

@@ -198,7 +198,8 @@ export default class BdcPm extends View {
       .border_b(1)
       .border_color(t.colors.border)
       .child(div().text_size(t.type.title).font_semibold().child("PM"))
-      .child(t.pill(words, tone));
+      // No run, no status: the body already says what to do first.
+      .when(view !== null, (row) => row.child(t.pill(words, tone)));
   }
 
   body(t) {
