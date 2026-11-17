@@ -84,7 +84,7 @@ function filters(t, rows, values, ctx) {
         .child(chip(t, dimension.all, chosen[dimension.key] === "", `bdc-filter-${dimension.key}-all`, (_event, cx) => ctx.setState({ [dimension.key]: "" }, cx)))
         .children(
           options.map((option) =>
-            chip(t, option.label, chosen[dimension.key] === option.value, `bdc-filter-${dimension.key}-${slug(option.value)}`, (_event, cx) =>
+            chip(t, option.label, chosen[dimension.key] === option.value, `bdc-filter-${dimension.key}-value-${slug(option.value)}`, (_event, cx) =>
               ctx.setState({ [dimension.key]: chosen[dimension.key] === option.value ? "" : option.value }, cx),
             ),
           ),
