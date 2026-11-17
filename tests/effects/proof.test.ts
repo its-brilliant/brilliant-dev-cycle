@@ -213,3 +213,27 @@ describe('checkProof', () => {
     expect(await done).toEqual({ complete: true, missing: [], invalid: [] });
   });
 });
+
+/** 17 Nov 2026: a phase whose checks all passed was blocked because a silent check's empty log was its "tests" proof. */
+describe('bdc verification report as proof', () => {
+  it('a passing report is test proof, and a failing one names the failed steps', async () => {
+    const { checkProof } = await import('../../src/effects/proof.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bdc-report-'));
+    try {
+      const write = (name: string, passed: boolean, failed: string[]) =>
+        fs.writeFileSync(
+          path.join(dir, name),
+          JSON.stringify({ bdcVerification: 1, runId: 'r1', phaseId: 'p1', passed, steps: [{ name: 'silent check', exitCode: 0 }, ...failed.map((step) => ({ name: step, exitCode: 1 }))] }),
+        );
+      write('ok.json', true, []);
+      write('bad.json', false, ['unit']);
+      const requirement = [{ kind: 'tests' as const, shows: 'the checks pass' }];
+      expect(checkProof({ requirements: requirement, items: [{ kind: 'tests', shows: '', file: path.join(dir, 'ok.json'), by: 'bdc' }] }, dir).complete).toBe(true);
+      const bad = checkProof({ requirements: requirement, items: [{ kind: 'tests', shows: '', file: path.join(dir, 'bad.json'), by: 'bdc' }] }, dir);
+      expect(bad.complete).toBe(false);
+      expect(bad.invalid[0]?.why).toContain('unit failed');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

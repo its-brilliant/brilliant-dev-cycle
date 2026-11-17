@@ -127,6 +127,31 @@ function addressIn(stdout: string): string | null {
 }
 
 /** A live terminal already labelled with this job key, or null (§3.2: launch is idempotent). */
+/**
+ * Close every hc terminal of a run, live or finished (spec §5.5: nothing is left behind). The daemon
+ * calls this when a run is done or cancelled, whatever its machines managed to close first.
+ */
+export async function closeRunTerminals(runId: string, hcBin = 'hc'): Promise<string[]> {
+  const listed = await spawnHc(hcBin, ['ls', '--json', '--all', '--label', `bdc.run=${runId}`]);
+  if (listed.error !== undefined || listed.code !== 0) return [];
+  let terminals: unknown;
+  try {
+    terminals = (JSON.parse(listed.stdout) as { terminals?: unknown }).terminals;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(terminals)) return [];
+  const closed: string[] = [];
+  for (const terminal of terminals) {
+    const address = (terminal as { address?: unknown }).address;
+    if (typeof address !== 'string' || address === '') continue;
+    await spawnHc(hcBin, ['kill', address]);
+    await spawnHc(hcBin, ['rm', address]);
+    closed.push(address);
+  }
+  return closed;
+}
+
 async function liveTerminal(hcBin: string, key: string): Promise<string | null> {
   const stdout = await hcText(hcBin, ['ls', '--json', '--label', `bdc.key=${key}`], 'ls');
   let parsed: unknown;

@@ -82,6 +82,8 @@ interface PmContext {
   current: PmRequest | null;
   /** Turns the current request has had; 2 means it already used its one retry after a restart. */
   turns: number;
+  /** Results of this request that went through the wrong tool (a reply where a decision was due). */
+  nudges: number;
   restarts: number;
   requests: number;
   /** The ask the PM is waiting on, with the questions it asked, so the answer can be labelled (§3.4). */
@@ -166,6 +168,11 @@ export function decidePrompt(request: { scope: string; blocker: Blocker; fixAllo
 }
 
 /** The turn for a request, whichever kind it is. */
+/** The nudge after a result through the wrong tool: the same request again, saying what went wrong. */
+export function wrongToolPrompt(request: PmRequest): string {
+  return ['Your last result did not answer this request: it went through the wrong tool. Answer it with the tool it names.', '', requestPrompt(request)].join('\n');
+}
+
 export function requestPrompt(request: PmRequest): string {
   switch (request.type) {
     case 'INTAKE':
@@ -318,6 +325,16 @@ export const pmMachine = setup({
     }),
   },
   guards: {
+    /**
+     * The PM finished its turn with a result, but through the wrong tool (seen 17 Nov 2026: it sent its
+     * decision as a `reply`). The session is fine; it gets one nudge before anything is restarted.
+     */
+    wrongTool: ({ context, event }) =>
+      event.type === 'AGENT_RESULT' &&
+      event.outcome.status === 'done' &&
+      context.current !== null &&
+      context.nudges < 1 &&
+      submissionToRun(context.current, event.outcome.submission) === null,
     /** There is a request waiting for a turn. */
     queued: ({ context }) => context.queue.length > 0,
     /** The current request is still worth retrying after a restart (§5.4: retry once). */
@@ -417,7 +434,12 @@ export const pmMachine = setup({
       });
     }),
     clearAsking: assign({ asking: null }),
-    finishRequest: assign({ current: null, turns: 0 }),
+    finishRequest: assign({ current: null, turns: 0, nudges: 0 }),
+    nudgeTool: enqueueActions(({ context, enqueue }) => {
+      if (context.current === null) return;
+      enqueue.assign({ nudges: context.nudges + 1 });
+      enqueue.sendTo(context.agentId, { type: 'FOLLOW_UP', prompt: wrongToolPrompt(context.current) });
+    }),
     recordFailure: assign({
       failure: ({ event }) => (event.type === 'AGENT_RESULT' && event.outcome.status !== 'done' ? event.outcome.detail : 'the PM produced no result'),
     }),
@@ -475,6 +497,7 @@ export const pmMachine = setup({
     queue: [],
     current: null,
     turns: 0,
+    nudges: 0,
     restarts: 0,
     requests: 0,
     asking: null,
@@ -523,6 +546,7 @@ export const pmMachine = setup({
         DECIDE: { actions: 'enqueueRequest' },
         AGENT_RESULT: [
           { guard: 'resultMaps', target: 'idle', actions: ['recordResult', 'sendResultToRun', 'finishRequest'] },
+          { guard: 'wrongTool', actions: ['recordResult', 'nudgeTool'] },
           // Session lost or no artifact: restart once, primed from the transcript (§5.4).
           { guard: 'canRetry', target: 'restarting', actions: ['recordResult', 'recordFailure', 'countTurn'] },
           { target: 'idle', actions: ['recordResult', 'recordFailure', 'sendFailedToRun', 'finishRequest'] },

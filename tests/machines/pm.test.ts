@@ -275,6 +275,24 @@ describe('pmMachine', () => {
     });
   });
 
+  /** 17 Nov 2026: the PM sent its decision as a `reply`, and the run failed instead of asking again. */
+  it('a result through the wrong tool gets one nudge in the same session, not a restart', () => {
+    const test = harness([
+      { kind: 'result', outcome: { status: 'done', submission: brief } },
+      { kind: 'result', outcome: { status: 'done', submission: { text: 'Decision: continue, the proof gate is a false positive.' } } },
+      { kind: 'result', outcome: { status: 'done', submission: { action: 'continue', reason: 'the proof gate is a false positive' } } },
+    ]);
+    test.step();
+    test.send({ type: 'DECIDE', scope: 'p2', blocker: { kind: 'proof', summary: 'tests proof invalid', evidence: [] }, fixAllowed: true });
+    test.step();
+    // Same session, nudged with the request again; nothing reached the run yet, nothing restarted.
+    expect(nth(test.script.prompts, 2)).toContain('wrong tool');
+    expect(nth(test.script.prompts, 2)).toContain('`decide`');
+    expect(test.received.filter((event) => event.type === 'PM_FAILED')).toEqual([]);
+    test.step();
+    expect(test.received.at(-1)).toEqual({ type: 'PM_DECISION', scope: 'p2', decision: { action: 'continue', reason: 'the proof gate is a false positive' } });
+  });
+
   it('runs one request at a time: a second request waits for the first turn', () => {
     const test = harness([
       { kind: 'result', outcome: { status: 'done', submission: brief } },

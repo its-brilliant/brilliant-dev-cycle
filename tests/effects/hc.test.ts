@@ -665,3 +665,25 @@ describe('bin/bdc-adapt', () => {
     expect(result.stderr).toContain('usage: bdc-adapt');
   });
 });
+
+describe('closeRunTerminals', () => {
+  it('kills and removes every terminal labelled with the run, live or finished, and no other', async () => {
+    const { closeRunTerminals } = await import('../../src/effects/hc.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bdc-close-run-'));
+    try {
+      const log = path.join(dir, 'calls.log');
+      const bin = path.join(dir, 'hc');
+      fs.writeFileSync(
+        bin,
+        `#!/bin/sh\necho "$*" >> "${log}"\nif [ "$1" = ls ]; then\n  case "$*" in *bdc.run=r-1*) echo '{"terminals":[{"address":"t1","state":"live"},{"address":"t2","state":"finished"}]}';; *) echo '{"terminals":[]}';; esac\nfi\n`,
+      );
+      fs.chmodSync(bin, 0o755);
+      expect(await closeRunTerminals('r-1', bin)).toEqual(['t1', 't2']);
+      const calls = fs.readFileSync(log, 'utf8').trim().split('\n');
+      expect(calls[0]).toBe('ls --json --all --label bdc.run=r-1');
+      expect(calls.slice(1)).toEqual(['kill t1', 'rm t1', 'kill t2', 'rm t2']);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

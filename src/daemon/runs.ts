@@ -27,6 +27,8 @@ export interface ProjectRunsOptions {
   effects: (input: RunInput) => WiredEffects;
   /** Lens prompt text per lens name (§8). Slice 1 reads no prompt files, so this defaults to none. */
   lensPrompts?: Record<string, string>;
+  /** When a run is done or cancelled: close everything it still has running (real runs: its hc terminals). */
+  onRunEnded?: (input: RunInput) => void;
 }
 
 /** The input is stored beside the snapshot so a restart can build the same machine (§5.7). */
@@ -127,6 +129,7 @@ export class ProjectRuns {
       store: new RunStore(files, MACHINE_VERSION),
       // The host is generic; this project only ever hosts run machines.
       project: (snapshot) => projectRun(snapshot as RunSnapshot),
+      onFinal: () => this.#options.onRunEnded?.(input),
       validate: (event) => {
         const parsed = PersonEvent.safeParse(event);
         if (parsed.success) return parsed.data;

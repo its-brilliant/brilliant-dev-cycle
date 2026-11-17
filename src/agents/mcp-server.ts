@@ -151,7 +151,44 @@ function askUserTool(): Tool {
 function inputSchemaOf(schema: z.ZodType): Tool['inputSchema'] {
   const json = { ...(z.toJSONSchema(schema, { io: 'input' }) as Record<string, unknown>) };
   delete json['$schema'];
-  return { type: 'object', ...json } as Tool['inputSchema'];
+  return flattenAlternatives({ type: 'object', ...json }) as Tool['inputSchema'];
+}
+
+type JsonSchema = Record<string, unknown> & { properties?: Record<string, Record<string, unknown>>; required?: string[] };
+
+/**
+ * The Anthropic API takes a tool's input only as one plain object at the top level: a `oneOf` or
+ * `anyOf` there (a decision is fix | continue | stop) makes claude drop the tool without a word,
+ * as `decide` was on 17 Nov 2026. So advertise one object with every field of every alternative,
+ * the discriminator's values merged into one enum, and required only what all of them need. The
+ * real check is still bdc's: `submit` validates with the zod schema and answers with the problems.
+ */
+export function flattenAlternatives(schema: JsonSchema): JsonSchema {
+  const alternatives = (schema.oneOf ?? schema.anyOf) as JsonSchema[] | undefined;
+  if (!Array.isArray(alternatives) || alternatives.length === 0) return schema;
+  const properties: Record<string, Record<string, unknown>> = {};
+  for (const alternative of alternatives) {
+    for (const [name, property] of Object.entries(alternative.properties ?? {})) {
+      const seen = properties[name];
+      const values = [property.const, ...((property.enum as unknown[] | undefined) ?? [])].filter((value) => value !== undefined);
+      if (seen === undefined) {
+        properties[name] = values.length > 0 ? { type: property.type ?? 'string', enum: values } : { ...property };
+      } else if (values.length > 0) {
+        seen.enum = [...new Set([...((seen.enum as unknown[] | undefined) ?? []), ...values])];
+      }
+    }
+  }
+  const required = alternatives
+    .map((alternative) => alternative.required ?? [])
+    .reduce((all, names) => all.filter((name) => names.includes(name)));
+  const { oneOf: _oneOf, anyOf: _anyOf, ...rest } = schema;
+  return { ...rest, type: 'object', properties, required };
+}
+
+/** Every MCP tool a job has, by its bdc name (claude's `--allowedTools` lists them as `mcp__bdc__<name>`). */
+export function jobToolNames(kind: SubmitKind): string[] {
+  const kinds = PM_KINDS.includes(kind) ? PM_KINDS : [kind];
+  return [...kinds.map((each) => SUBMIT_TOOLS[each]), ...(PM_KINDS.includes(kind) ? [ASK_USER_TOOL] : []), GET_CONTEXT_TOOL];
 }
 
 /** `<agentDir>/context.md`, written by the job's launcher, or a line saying there is none. */

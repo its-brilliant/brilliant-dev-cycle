@@ -132,13 +132,26 @@ async function verify(input: RunVerificationInput, portBase: number): Promise<Ru
     fs.rmSync(marker, { force: true });
   }
 
+  // bdc's own proof (§4.4.1): one report of every step, what it ran and how it ended. It comes first
+  // in proofFiles and is what a `tests` or `log` requirement is checked against; each step's full
+  // log follows it. (17 Nov 2026: matching logs to requirements by position handed the `tests`
+  // requirement an empty log of a silent check, and a phase whose checks all passed was blocked.)
+  const passed = failedAt === undefined;
+  const report = path.join(logDir, REPORT_FILE);
+  fs.writeFileSync(
+    report,
+    `${JSON.stringify({ bdcVerification: 1, runId: input.runId, phaseId: input.phaseId, passed, ...(passed ? {} : { failedAt }), steps: runner.steps }, null, 2)}\n`,
+  );
   return {
-    passed: failedAt === undefined,
-    ...(failedAt === undefined ? {} : { failedAt }),
+    passed,
+    ...(passed ? {} : { failedAt }),
     steps: runner.steps,
-    proofFiles: runner.proofFiles(),
+    proofFiles: [path.relative(input.worktree, report), ...runner.proofFiles()],
   };
 }
+
+/** The verification report bdc writes in each phase's proof folder. */
+export const REPORT_FILE = 'verification.json';
 
 interface RunnerOptions {
   worktree: string;

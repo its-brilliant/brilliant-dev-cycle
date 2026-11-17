@@ -110,3 +110,12 @@ describe('commandFor', () => {
     );
   });
 });
+
+describe('claude is allowed every bdc tool of its job', () => {
+  it('a PM may ask, brief, reply and decide without a permission prompt', async () => {
+    const { commandFor } = await import('../../src/agents/command.js');
+    const job = { key: 'r1/pm', role: 'pm' as const, agent: { cli: 'claude', model: '' }, cwd: '/r', prompt: 'p', submit: 'brief' as const, timeoutMs: 1, keepAlive: true, labels: {} };
+    const argv = commandFor(job, { mcpConfigPath: '/r/mcp.json', bdcBin: ['node', 'bdc'] }).argv;
+    for (const tool of ['ask_user', 'submit_brief', 'reply', 'decide', 'get_context']) expect(argv).toContain(`mcp__bdc__${tool}`);
+  });
+});

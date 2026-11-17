@@ -37,3 +37,23 @@ describe('RunHost persists changes inside child actors', () => {
     host.stop();
   });
 });
+
+/** 17 Nov 2026: a cancelled run left its PM's claude running; the daemon now cleans up on the final state. */
+describe('RunHost onFinal', () => {
+  it('is called once when the machine reaches a final state', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bdc-host-final-'));
+    try {
+      const machine = createMachine({ id: 'm', initial: 'running', states: { running: { on: { CANCEL: 'cancelled' } }, cancelled: { type: 'final' } } });
+      let finals = 0;
+      const host = new RunHost({ machine, machineVersion: 1, input: {}, store: new RunStore(projectPaths(root).run('r-final'), 1), project: () => ({}), onFinal: () => (finals += 1) });
+      host.start();
+      expect(finals).toBe(0);
+      host.send({ type: 'CANCEL' });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(finals).toBe(1);
+      host.stop();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

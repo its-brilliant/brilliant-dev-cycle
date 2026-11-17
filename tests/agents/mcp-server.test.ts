@@ -66,13 +66,19 @@ describe('bdc mcp', () => {
     }
   });
 
-  it('advertises a decision as an object with oneOf, since a union is still an object on the wire', async () => {
+  /** 17 Nov 2026: claude dropped `decide` because its schema was a top-level oneOf. */
+  it('advertises a decision as one plain object, which is all the Anthropic API takes', async () => {
     const { client, close } = await connect('decision');
     try {
       const { tools } = await client.listTools();
       const decide = tools.find((tool) => tool.name === SUBMIT_TOOLS.decision);
-      expect(decide?.inputSchema).toMatchObject({ type: 'object' });
-      expect(decide?.inputSchema.oneOf).toBeDefined();
+      const schema = decide?.inputSchema as { type: string; oneOf?: unknown; anyOf?: unknown; properties: Record<string, { enum?: string[] }>; required: string[] };
+      expect(schema.type).toBe('object');
+      expect(schema.oneOf).toBeUndefined();
+      expect(schema.anyOf).toBeUndefined();
+      expect(schema.properties.action?.enum?.sort()).toEqual(['continue', 'fix', 'stop']);
+      expect(Object.keys(schema.properties)).toEqual(expect.arrayContaining(['action', 'reason', 'instructions']));
+      expect(schema.required.sort()).toEqual(['action', 'reason']);
     } finally {
       await close();
     }

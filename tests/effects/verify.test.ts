@@ -210,7 +210,9 @@ describe('runVerification', () => {
       }),
     );
 
+    // bdc's report first (the proof for tests/log requirements), then each step's full log.
     expect(output.proofFiles).toEqual([
+      path.join('.bdc-proof', 'p1', 'verification.json'),
       path.join('.bdc-proof', 'p1', 'verify-2-types.log'),
       path.join('.bdc-proof', 'p1', 'verify-1-up.log'),
       path.join('.bdc-proof', 'p1', 'verify-3-down.log'),
@@ -219,7 +221,10 @@ describe('runVerification', () => {
       expect(path.isAbsolute(file)).toBe(false);
       expect(fs.existsSync(path.join(repo, file))).toBe(true);
     }
-    expect(fs.readFileSync(path.join(repo, output.proofFiles[0] ?? ''), 'utf8')).toBe('$ echo checked\n\nchecked\n');
+    expect(fs.readFileSync(path.join(repo, output.proofFiles[1] ?? ''), 'utf8')).toBe('$ echo checked\n\nchecked\n');
+    const report = JSON.parse(fs.readFileSync(path.join(repo, output.proofFiles[0] ?? ''), 'utf8'));
+    expect(report).toMatchObject({ bdcVerification: 1, phaseId: 'p1', passed: true });
+    expect(report.steps.map((step: { name: string }) => step.name)).toEqual(['up', 'types', 'down']);
   });
 
   it('keeps only the last 4000 characters in the step result', async () => {
@@ -230,7 +235,7 @@ describe('runVerification', () => {
     );
 
     expect(output.steps[0]?.outputTail).toBe('x'.repeat(4000));
-    const log = fs.readFileSync(path.join(repo, output.proofFiles[0] ?? ''), 'utf8');
+    const log = fs.readFileSync(path.join(repo, output.proofFiles[1] ?? ''), 'utf8');
     expect(log.length).toBeGreaterThan(5000);
   });
 
@@ -266,7 +271,7 @@ describe('runVerification', () => {
 
     expect(output.passed).toBe(true);
     expect(output.steps.map((step) => step.phase)).toEqual(['check']);
-    expect(output.proofFiles).toHaveLength(1);
+    expect(output.proofFiles).toHaveLength(2);
   });
 
   it('answers a failed setup instead of throwing when the worktree cannot be used', async () => {

@@ -22,6 +22,12 @@ export interface RunHostOptions {
   project: (snapshot: SnapshotFrom<AnyStateMachine>) => unknown;
   /** Default: every event is accepted. The daemon passes `PersonEvent.parse` (spec §5.6). */
   validate?: ValidateEvent;
+  /**
+   * Called once when the machine reaches a final state. The daemon closes the run's terminals here:
+   * a final state stops every child actor at once, so a child cannot be trusted to have closed its
+   * own agent first (17 Nov 2026: a cancelled run left its PM's claude running).
+   */
+  onFinal?: () => void;
 }
 
 export class RunHost {
@@ -36,6 +42,8 @@ export class RunHost {
   #view: JsonValue | undefined;
   #stopped = false;
   #publishScheduled = false;
+  #finalHandled = false;
+  readonly #onFinal: (() => void) | undefined;
 
   constructor(options: RunHostOptions) {
     this.#machine = options.machine;
@@ -43,6 +51,7 @@ export class RunHost {
     this.#store = options.store;
     this.#project = options.project;
     this.#validate = options.validate;
+    this.#onFinal = options.onFinal;
   }
 
   /** Restore from this run's snapshot when it is compatible, otherwise start the machine fresh. */
@@ -124,6 +133,10 @@ export class RunHost {
     const actor = this.#actor;
     if (!actor || this.#stopped) return;
     const snapshot = actor.getSnapshot();
+    if (snapshot.status === 'done' && !this.#finalHandled) {
+      this.#finalHandled = true;
+      this.#onFinal?.();
+    }
     // Snapshot first: a crash between the two writes must never leave a view ahead of the state.
     this.#store.writeSnapshot(actor.getPersistedSnapshot());
     const view = this.#projectView(snapshot);

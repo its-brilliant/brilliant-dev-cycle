@@ -98,6 +98,13 @@ const FAIL_SUMMARY = /(?:^|\s)(?!0\b)\d+\s+(?:failed|failing|failures?|errors?)\
 
 function testReportProblem(full: string, file: string): string | null {
   const text = readReport(full);
+  // bdc's own verification report (src/effects/verify.ts): the checks bdc ran, with their exit codes.
+  const report = bdcReport(text);
+  if (report !== null) {
+    if (report.passed) return null;
+    const failed = report.steps.filter((step) => step.exitCode !== 0).map((step) => step.name);
+    return `the verification report ${file} says ${failed.length > 0 ? failed.join(', ') : 'a step'} failed`;
+  }
   if (/<testsuites?\b/i.test(text)) {
     const failures = failuresInXml(text);
     return failures === 0 ? null : `the test report ${file} says ${failures} test${failures === 1 ? '' : 's'} failed`;
@@ -160,4 +167,15 @@ function isVideo(full: string): boolean {
 
 function startsWith(bytes: Buffer, magic: number[]): boolean {
   return magic.every((byte, index) => bytes[index] === byte);
+}
+
+/** A verification report bdc wrote, or null for any other file. */
+function bdcReport(text: string): { passed: boolean; steps: Array<{ name: string; exitCode: number | null }> } | null {
+  try {
+    const value = JSON.parse(text) as { bdcVerification?: unknown; passed?: unknown; steps?: unknown };
+    if (value.bdcVerification !== 1 || typeof value.passed !== 'boolean' || !Array.isArray(value.steps)) return null;
+    return { passed: value.passed, steps: value.steps as Array<{ name: string; exitCode: number | null }> };
+  } catch {
+    return null;
+  }
 }

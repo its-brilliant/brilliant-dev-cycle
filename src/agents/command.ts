@@ -12,8 +12,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { SUBMIT_TOOLS, type AgentJob } from '../contracts/actors.js';
-import { GET_CONTEXT_TOOL, MCP_SERVER_NAME } from './mcp-server.js';
+import type { AgentJob } from '../contracts/actors.js';
+import { MCP_SERVER_NAME, jobToolNames } from './mcp-server.js';
 import { ROLE_SYSTEM } from './prompts.js';
 
 export interface CommandOptions {
@@ -43,11 +43,10 @@ const ADAPTERS: Record<string, (job: AgentJob, options: CommandOptions) => strin
     ...modelArgs(job),
     '--mcp-config',
     options.mcpConfigPath,
-    // claude asks before it uses a tool that is not allowed; the submit tool and get_context are the
-    // only MCP tools this job has, and an unanswered prompt would look like a stuck agent (§3.3).
+    // claude asks before it uses a tool that is not allowed, and an unanswered prompt looks like a stuck
+    // agent (§3.3): allow every bdc tool this job has (a PM has ask_user, submit_brief, reply, decide).
     '--allowedTools',
-    mcpToolName(SUBMIT_TOOLS[job.submit]),
-    mcpToolName(GET_CONTEXT_TOOL),
+    ...jobToolNames(job.submit).map(mcpToolName),
     '--append-system-prompt',
     ROLE_SYSTEM[job.role],
     job.prompt,

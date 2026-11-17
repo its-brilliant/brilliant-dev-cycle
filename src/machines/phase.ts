@@ -677,11 +677,13 @@ export const phaseMachine = setup({
     collectBdcProof: assign({
       proofItems: ({ context }) => {
         const fromVerifier = context.proofItems.filter((item) => item.by !== 'bdc');
-        const files = [...context.proofFiles];
+        // The first proof file is bdc's verification report (every step, how it ended): it is the proof
+        // for every requirement bdc provides. Not positional: the logs after it are for people.
+        const report = context.proofFiles[0];
         const fromBdc: ProofItem[] = [];
         for (const requirement of context.phase.proof) {
           if (!BDC_KINDS.includes(requirement.kind)) continue;
-          const file = files.shift();
+          const file = report;
           fromBdc.push(
             file === undefined
               ? { kind: requirement.kind, shows: requirement.shows, by: 'bdc' }

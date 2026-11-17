@@ -16,7 +16,9 @@ import { runChat, streamTerminal } from './chat.js';
 import { connect, ensureDaemon, newRequestId, type DaemonClient } from '../daemon/client.js';
 import { latestRunId, projectPaths } from '../daemon/paths.js';
 import { ProjectRuns } from '../daemon/runs.js';
+import type { RunInput } from '../machines/run.js';
 import { startDaemon } from '../daemon/server.js';
+import { closeRunTerminals } from '../effects/hc.js';
 import { realEffects } from '../effects/real.js';
 import { scriptedActors } from '../effects/scripted.js';
 
@@ -230,6 +232,8 @@ export async function daemon(args: string[], io: CliIO): Promise<number> {
 
   const runs = new ProjectRuns(root, {
     effects: (input) => (scripted ? scriptedActors({ goal: input.goal }) : realEffects(input)),
+    // §5.5: when a run ends, nothing of it keeps running, whatever its machines closed themselves.
+    ...(scripted ? {} : { onRunEnded: (input: RunInput) => void closeRunTerminals(input.runId) }),
   });
   const restored = runs.restoreAll();
   const server = await startDaemon({ root: runs.root, hostFor: (runId) => runs.hostFor(runId), runs: () => runs.runs() });
