@@ -2,7 +2,7 @@
  * `bdc` entry point (spec §7.2). `main` parses argv, runs one command and answers with an exit
  * code; it never calls `process.exit`, so tests drive it directly. `bin.ts` is the executable.
  */
-import { USAGE, UsageError, chat, daemon, herdr, mcp, runs, say, send, start, status, submit, watch, type CliIO } from './commands.js';
+import { USAGE, UsageError, chat, daemon, herdr, init, mcp, runs, say, send, start, status, submit, watch, type CliIO } from './commands.js';
 
 export type { CliIO } from './commands.js';
 export { USAGE } from './commands.js';
@@ -21,6 +21,8 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
   const [command, ...args] = argv;
   try {
     switch (command) {
+      case 'init':
+        return await init(args, io);
       case 'start':
         return await start(args, io);
       case 'daemon':
