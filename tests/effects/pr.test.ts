@@ -317,7 +317,7 @@ describe('the GitHub target', () => {
   const PR_URL = 'https://github.com/its-brilliant/brilliant-dev-cycle/pull/7';
 
   /** What gh and git answer for a first ship: no PR yet, no proof branch yet. */
-  function firstShip(overrides: { view?: RunView } = {}): { run: RunCommand; calls: Call[] } {
+  function firstShip(): { run: RunCommand; calls: Call[] } {
     return fakeRun((command, args) => {
       if (command === 'gh' && args[0] === 'pr' && args[1] === 'view') return { code: 1, stdout: '', stderr: 'no pull requests found' };
       if (command === 'gh' && args[0] === 'pr' && args[1] === 'create') return { code: 0, stdout: `${PR_URL}\n`, stderr: '' };
@@ -333,7 +333,6 @@ describe('the GitHub target', () => {
       }
       return undefined;
     });
-    void overrides;
   }
 
   it('pushes the run branch, opens one PR, publishes the proof and comments once per phase', async () => {
