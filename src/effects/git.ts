@@ -112,6 +112,21 @@ export function worktreePathFor(root: string, branch: string): string {
   return path.join(root, '.worktrees', branch.replace(/\//g, '-'));
 }
 
+/**
+ * The ref name git can actually hold for a branch bdc names.
+ *
+ * §7.3 names the branches `bdc/<run>`, `bdc/<run>/<phase>` and `bdc/<run>/<phase>/<task>`, but git
+ * cannot keep those: `refs/heads/bdc/<run>` is a file, and `refs/heads/bdc/<run>/<phase>` needs it
+ * to be a directory, so creating the second one fails with "cannot lock ref". bdc therefore keeps
+ * one level under `bdc/` and joins the parts with `@`, which no run, phase or task id may contain.
+ * The run branch — the one a person sees on the pull request — is unchanged. Every logical name
+ * bdc hands these effects is translated here, so a machine keeps talking in §7.3 names.
+ */
+export function refBranch(branch: string): string {
+  const parts = branch.split('/');
+  return parts[0] === 'bdc' && parts.length > 2 ? `bdc/${parts.slice(1).join('@')}` : branch;
+}
+
 /** git prints canonical paths; a temp directory on macOS is reached through a symlink. */
 function realPath(file: string): string {
   try {
@@ -167,8 +182,9 @@ async function ensureWorktree(ctx: GitContext, input: EnsureWorktreeInput): Prom
   const worktree = worktreePathFor(root, branch);
   await ignoreWorktrees(ctx, root);
 
-  const exists = (await gitCall(ctx, root, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])).code === 0;
-  if (!exists) await gitText(ctx, root, ['branch', branch, base]);
+  const ref = refBranch(branch);
+  const exists = (await gitCall(ctx, root, ['show-ref', '--verify', '--quiet', `refs/heads/${ref}`])).code === 0;
+  if (!exists) await gitText(ctx, root, ['branch', ref, refBranch(base)]);
 
   const listed = await worktrees(ctx, root);
   const current = listed.get(realPath(worktree));
@@ -176,9 +192,9 @@ async function ensureWorktree(ctx: GitContext, input: EnsureWorktreeInput): Prom
     if (fs.existsSync(worktree)) {
       throw new Error(`${worktree} already exists and is not a worktree bdc made for ${branch}; bdc will not use it`);
     }
-    await gitText(ctx, root, ['worktree', 'add', worktree, branch]);
-  } else if (current !== branch) {
-    throw new Error(`the worktree at ${worktree} has ${current ?? 'a detached HEAD'} checked out, not ${branch}`);
+    await gitText(ctx, root, ['worktree', 'add', worktree, ref]);
+  } else if (current !== ref) {
+    throw new Error(`the worktree at ${worktree} has ${current ?? 'a detached HEAD'} checked out, not ${ref}`);
   }
 
   const head = (await gitText(ctx, worktree, ['rev-parse', 'HEAD'])).trim();
@@ -209,7 +225,9 @@ function mergeFailure(into: string, from: string, result: CommandResult): string
  * conflict is aborted with the files it was in (§7.3). `into` is a worktree path, `from` a branch.
  */
 async function mergeBranch(ctx: GitContext, input: MergeBranchInput): Promise<MergeBranchOutput> {
-  const { into, from } = input;
+  const { into } = input;
+  // The commit message names the branch the way bdc and the person name it, not the ref it lives in.
+  const from = refBranch(input.from);
   const head = async (): Promise<string> => (await gitText(ctx, into, ['rev-parse', 'HEAD'])).trim();
 
   // Already merged: a restored run asks again, and the answer is the head it has (§5.7).
@@ -222,7 +240,7 @@ async function mergeBranch(ctx: GitContext, input: MergeBranchInput): Promise<Me
   }
 
   const identity = await identityArgs(ctx, into);
-  const merge = await gitCall(ctx, into, [...identity, 'merge', '--no-ff', '--no-edit', '-m', `bdc: merge ${from}`]);
+  const merge = await gitCall(ctx, into, [...identity, 'merge', '--no-ff', '--no-edit', '-m', `bdc: merge ${input.from}`, from]);
   if (merge.code === 0) return { merged: true, head: await head() };
 
   // A conflict leaves MERGE_HEAD behind. Anything else (local changes in the way) left the worktree
@@ -257,7 +275,8 @@ function parseLog(stdout: string): Array<{ sha: string; files: string[] }> {
 
 /** The commits on `branch` after `base`, newest first, with the files each touched (§4.4). */
 async function commitsSince(ctx: GitContext, input: CommitsSinceInput): Promise<CommitsSinceOutput> {
-  const stdout = await gitText(ctx, input.root, ['log', '--format=%H', '--name-only', `${input.base}..${input.branch}`]);
+  const range = `${refBranch(input.base)}..${refBranch(input.branch)}`;
+  const stdout = await gitText(ctx, input.root, ['log', '--format=%H', '--name-only', range]);
   return { commits: parseLog(stdout) };
 }
 
