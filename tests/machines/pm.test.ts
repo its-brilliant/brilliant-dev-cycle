@@ -462,3 +462,12 @@ describe('pmMachine', () => {
     expect(test.script.choices).toEqual(['r1/pm:Trust']);
   });
 });
+
+/** Found in the first real grill-me run (17 Nov 2026): ticking nothing reached the PM as "skipped". */
+describe('answersPrompt', () => {
+  it('says "none" for a multi question answered with nothing ticked, and "skipped" only when skipped', () => {
+    const question = { id: 'extras', title: 'Which extras?', body: '', kind: 'multi' as const, options: [{ id: 'help', label: '--help' }], allowOther: true };
+    expect(answersPrompt([question], [{ questionId: 'extras', picked: [], text: '', skipped: false }])).toContain('Which extras? → none of these');
+    expect(answersPrompt([question], [{ questionId: 'extras', picked: [], text: '', skipped: true }])).toContain('skipped');
+  });
+});

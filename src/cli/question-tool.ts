@@ -34,6 +34,8 @@ export interface AskState {
   picked: string[];
   /** True once the person pressed Send on the summary. */
   sent: boolean;
+  /** Whether answering the last question shows the summary first. A one-question agent prompt does not. */
+  summary: boolean;
 }
 
 /** The answer to the question on screen. */
@@ -55,8 +57,9 @@ export function optionsOf(question: Question): Array<{ id: string; label: string
   return [];
 }
 
-export function startAsk(questions: Question[]): AskState {
+export function startAsk(questions: Question[], options: { summary?: boolean } = {}): AskState {
   const state: AskState = {
+    summary: options.summary ?? true,
     questions,
     answers: questions.map(() => null),
     screen: 0,
@@ -106,7 +109,8 @@ export function render(state: AskState, width: number): string[] {
 function enterQuestion(state: AskState, index: number): AskState {
   const question = state.questions[index];
   if (question === undefined) {
-    return { ...state, screen: state.questions.length, typing: false, text: '', picked: [], cursor: 0 };
+    const done = { ...state, screen: state.questions.length, typing: false, text: '', picked: [], cursor: 0 };
+    return state.summary ? done : { ...done, sent: true };
   }
   const previous = state.answers[index] ?? null;
   const picked = previous?.picked ?? [];
@@ -161,10 +165,10 @@ function pressOptions(state: AskState, key: Key): AskState {
     case ENTER: {
       if (question.kind === 'multi') return answerAndAdvance(state, { picked: state.picked, text: '', skipped: false });
       if (question.kind === 'text') return { ...state, typing: true };
-      // Enter accepts the recommended answer (§3.4); without one, the option the mark is on.
+      // Enter accepts the recommended answer (§3.4). Without one Enter does nothing: an agent's trust
+      // prompt lists "Don't trust it" first, and Enter must never pick that by accident.
       const recommended = options.find((option) => option.id === question.recommended);
-      const marked = question.kind === 'confirm' ? options[0] : options[state.cursor];
-      const chosen = recommended ?? marked;
+      const chosen = question.kind === 'confirm' ? options[0] : recommended;
       if (chosen === undefined) return state;
       return answerAndAdvance(state, { picked: [chosen.id], text: '', skipped: false });
     }
@@ -208,6 +212,8 @@ function renderOptions(state: AskState, question: Question): string[] {
     const toggled = question.kind === 'multi' ? `[${state.picked.includes(option.id) ? 'x' : ' '}] ` : '';
     const recommended = option.id === question.recommended ? '  (recommended)' : '';
     lines.push(`${mark} ${toggled}${index + 1}  ${option.label}${recommended}`);
+    // The PM's hint is what tells two options apart ("one file plus package.json"); keep it.
+    if (option.hint !== undefined && option.hint.trim() !== '') lines.push(`       ${option.hint.trim()}`);
   });
   if (question.allowOther && question.kind !== 'text') lines.push(`  ${OTHER}  Other…`);
   return lines;
@@ -246,7 +252,8 @@ function hint(state: AskState, question: Question): string {
   else {
     parts.push('1–9 to pick');
     const recommended = optionsOf(question).find((option) => option.id === question.recommended);
-    parts.push(question.kind === 'confirm' ? 'Enter for yes' : `Enter for ${recommended?.label ?? 'the marked one'}`);
+    if (question.kind === 'confirm') parts.push('Enter for yes');
+    else if (recommended !== undefined) parts.push(`Enter for ${recommended.label}`);
     if (question.allowOther) parts.push(`${OTHER} to type your own answer`);
   }
   if (state.screen > 0) parts.push(`${BACK} to go back`);

@@ -99,8 +99,8 @@ export async function runChat(options: ChatOptions): Promise<number> {
   };
 
   /** The question card: keys until the person sends the summary. Null when the session ends. */
-  const askQuestions = async (questions: Question[]): Promise<Answer[] | null> => {
-    let state: AskState = startAsk(questions);
+  const askQuestions = async (questions: Question[], options: { summary?: boolean } = {}): Promise<Answer[] | null> => {
+    let state: AskState = startAsk(questions, options);
     let drawn = 0;
     const draw = (): void => {
       terminal.clear(drawn);
@@ -149,7 +149,8 @@ export async function runChat(options: ChatOptions): Promise<number> {
   /** The card for one agent prompt, then PROMPT_CHOICE. Null to carry on. */
   const answerPrompt = async (prompt: RunView['agentPrompts'][number]): Promise<number | null> => {
     answeredPrompts.add(promptKey(prompt));
-    const answers = await askQuestions([promptQuestion(prompt)]);
+    // One question: the pick is the answer; no summary to confirm.
+    const answers = await askQuestions([promptQuestion(prompt)], { summary: false });
     if (answers === null) return 0;
     const choice = answers[0]?.picked[0];
     // A skipped prompt sends nothing: the agent keeps waiting for the person.
@@ -241,14 +242,14 @@ export async function runChat(options: ChatOptions): Promise<number> {
 const END_OF_INPUT = '\u0000end';
 
 /** A prompt from an agent (§9.1 rule 6), as a one-question card. Its choices are the option ids. */
-function promptQuestion(prompt: { agentKey: string; prompt: string; choices: string[] }): Question {
+export function promptQuestion(prompt: { agentKey: string; prompt: string; choices: string[] }): Question {
+  // No recommendation: claude lists "No, exit" first, and Enter must never pick it by accident.
   return {
     id: prompt.agentKey,
     title: prompt.prompt,
     body: '',
     kind: 'single',
     options: prompt.choices.map((choice) => ({ id: choice, label: choice })),
-    recommended: prompt.choices[0],
     allowOther: false,
   };
 }

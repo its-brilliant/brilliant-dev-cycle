@@ -199,6 +199,8 @@ export function answerWords(question: Question | undefined, answer: Answer): str
   if (labels.length > 0 && typed !== '') return `${labels.join(', ')} (${typed})`;
   if (labels.length > 0) return labels.join(', ');
   if (typed !== '') return typed;
+  // Ticking nothing on a multi question is an answer ("none of these"), not a skip.
+  if (question?.kind === 'multi') return 'none of these';
   return SKIPPED_ANSWER;
 }
 

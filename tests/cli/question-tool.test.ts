@@ -262,3 +262,36 @@ describe('the question card', () => {
     expect(summary.join('\n')).toContain('Enter to send');
   });
 });
+
+/** Found in the first real grill-me run (17 Nov 2026). */
+describe('question tool fixes from the first real run', () => {
+  const multi: Question = {
+    id: 'extras',
+    title: 'Which extras?',
+    body: '',
+    kind: 'multi',
+    options: [{ id: 'help', label: '--help' }, { id: 'tests', label: 'Tests', hint: 'node:test, no dependencies' }],
+    allowOther: true,
+  };
+
+  it('shows the hint the PM wrote under an option', () => {
+    const lines = render(startAsk([multi]), 100);
+    expect(lines.some((line) => line.includes('node:test, no dependencies'))).toBe(true);
+  });
+
+  it('a one-question card can send on its answer, without a summary screen', () => {
+    const single: Question = { id: 'trust', title: 'Trust this folder?', body: '', kind: 'single', options: [{ id: 'yes', label: 'Trust' }, { id: 'no', label: "Don't" }], allowOther: false };
+    const state = press(startAsk([single], { summary: false }), '1');
+    expect(result(state)?.answers).toEqual([{ questionId: 'trust', picked: ['yes'], text: '', skipped: false }]);
+  });
+});
+
+describe('agent prompt cards', () => {
+  it('recommend nothing, so Enter cannot pick "Don\'t trust it" by accident', async () => {
+    const { promptQuestion } = await import('../../src/cli/chat.js');
+    const question = promptQuestion({ agentKey: 'r1/pm', prompt: 'Do you trust the files in this folder?', choices: ["Don't trust it", 'Trust this folder'] });
+    expect(question.recommended).toBeUndefined();
+    const state = press(startAsk([question], { summary: false }), 'enter');
+    expect(result(state)).toBeNull();
+  });
+});
