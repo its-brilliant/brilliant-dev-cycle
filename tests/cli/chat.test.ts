@@ -353,6 +353,21 @@ describe('bdc chat', () => {
       session.stop();
     }
   });
+
+  it('leaves on Ctrl-C while a line is being typed', async () => {
+    const session = await startSession();
+    try {
+      show(emptyView());
+      await vi.waitFor(() => expect(printed(session.out)).toContain('Getting the goal straight'));
+
+      session.terminal.press('h', 'a', 'l', 'f', 'ctrl-c');
+
+      expect(await session.chat).toBe(0);
+      expect(personEvents()).toEqual([]);
+    } finally {
+      session.stop();
+    }
+  });
 });
 
 describe('bdc say', () => {

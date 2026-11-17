@@ -121,6 +121,55 @@ export async function runChat(options: ChatOptions): Promise<number> {
     }
   };
 
+  /** The transcript and the stage line: only what the person has not seen yet. */
+  const printChanges = (view: RunView): void => {
+    for (const entry of view.chat.slice(printedChat)) {
+      out(`${entry.from === 'pm' ? 'PM' : 'You'}: ${entry.text}\n`);
+    }
+    printedChat = view.chat.length;
+    if (view.stageWords !== shownStage) {
+      shownStage = view.stageWords;
+      out(`\n${view.stageWords}\n`);
+    }
+  };
+
+  /** The card for a waiting ask, then the event its answers become. Null to carry on. */
+  const answerAsk = async (ask: NonNullable<RunView['asking']>): Promise<number | null> => {
+    const answers = await askQuestions(ask.questions);
+    if (answers === null) return 0;
+    // An intake round answers the PM's turn; a scoped ask answers the phase or agent that asked.
+    const event = ask.scope === null ? { type: 'ROUND_ANSWERED', answers } : { type: 'ANSWER', askId: ask.askId, answers };
+    return (await send(event)) ? null : 1;
+  };
+
+  /** The card for one agent prompt, then PROMPT_CHOICE. Null to carry on. */
+  const answerPrompt = async (prompt: RunView['agentPrompts'][number]): Promise<number | null> => {
+    answeredPrompts.add(promptKey(prompt));
+    const answers = await askQuestions([promptQuestion(prompt)]);
+    if (answers === null) return 0;
+    const choice = answers[0]?.picked[0];
+    // A skipped prompt sends nothing: the agent keeps waiting for the person.
+    if (choice === undefined) return null;
+    return (await send({ type: 'PROMPT_CHOICE', agentKey: prompt.agentKey, choice })) ? null : 1;
+  };
+
+  /** A prompt that left the view was answered; the same words later are a new question. */
+  const forgetClearedPrompts = (prompts: RunView['agentPrompts']): void => {
+    const showing = new Set(prompts.map(promptKey));
+    for (const key of answeredPrompts) if (!showing.has(key)) answeredPrompts.delete(key);
+  };
+
+  /** What a line the person typed does. Null to carry on. */
+  const runLine = async (text: string): Promise<number | null> => {
+    if (text === '') return null;
+    if (text === '/quit') return 0;
+    if (text === '/status') {
+      out(`${session.view?.stageWords ?? 'no view yet'}\n`);
+      return null;
+    }
+    return (await send({ type: 'MESSAGE', text })) ? null : 1;
+  };
+
   let unsubscribe: () => void;
   try {
     unsubscribe = await client.subscribe(runId, (raw) => {
@@ -141,35 +190,21 @@ export async function runChat(options: ChatOptions): Promise<number> {
       if (session.stopped) return 0;
       const view = session.view;
       if (view !== null) {
-        for (const entry of view.chat.slice(printedChat)) {
-          out(`${entry.from === 'pm' ? 'PM' : 'You'}: ${entry.text}\n`);
-        }
-        printedChat = view.chat.length;
-        if (view.stageWords !== shownStage) {
-          shownStage = view.stageWords;
-          out(`\n${view.stageWords}\n`);
-        }
-
+        printChanges(view);
         const ask = view.asking;
         if (ask !== null && !answeredAsks.has(ask.askId)) {
           answeredAsks.add(ask.askId);
-          const answers = await askQuestions(ask.questions);
-          if (answers === null) return 0;
-          // Intake rounds answer the PM's turn; a scoped ask answers the phase or agent that asked.
-          const event = ask.scope === null ? { type: 'ROUND_ANSWERED', answers } : { type: 'ANSWER', askId: ask.askId, answers };
-          if (!(await send(event))) return 1;
+          const code = await answerAsk(ask);
+          if (code !== null) return code;
           continue;
         }
-
         const prompt = view.agentPrompts.find((entry) => !answeredPrompts.has(promptKey(entry)));
         if (prompt !== undefined) {
-          answeredPrompts.add(promptKey(prompt));
-          const answers = await askQuestions([promptQuestion(prompt)]);
-          if (answers === null) return 0;
-          const choice = answers[0]?.picked[0];
-          if (choice !== undefined && !(await send({ type: 'PROMPT_CHOICE', agentKey: prompt.agentKey, choice }))) return 1;
+          const code = await answerPrompt(prompt);
+          if (code !== null) return code;
           continue;
         }
+        forgetClearedPrompts(view.agentPrompts);
       }
 
       // A new view or a key: either way the whole screen is looked at again.
@@ -178,17 +213,12 @@ export async function runChat(options: ChatOptions): Promise<number> {
         await wake.wait();
         continue;
       }
-      if (key === END_OF_INPUT) return 0;
+      if (key === END_OF_INPUT || key === 'ctrl-c') return 0;
       if (key === 'enter') {
         const text = line.trim();
         line = '';
-        if (text === '') continue;
-        if (text === '/quit') return 0;
-        if (text === '/status') {
-          out(`${session.view?.stageWords ?? 'no view yet'}\n`);
-          continue;
-        }
-        if (!(await send({ type: 'MESSAGE', text }))) return 1;
+        const code = await runLine(text);
+        if (code !== null) return code;
         continue;
       }
       if (key === 'backspace') line = line.slice(0, -1);
