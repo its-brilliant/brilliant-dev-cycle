@@ -1,0 +1,9 @@
+⏺ Here is the plan:
+
+  1. Create hello.sh
+  2. chmod +x hello.sh
+  3. Commit
+
+⏺ Now writing the file.
+
+✻ Working…

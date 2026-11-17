@@ -1,0 +1,10 @@
+⏺ The task is ready to build.
+
+ Tool: run_command
+
+   npm run build
+
+ Allow this command?
+ ❯ 1. Yes
+   2. Yes, don't ask again
+   3. No

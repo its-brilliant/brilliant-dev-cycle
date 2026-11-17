@@ -1,0 +1,11 @@
+❯ Add a hello-world CLI script
+
+⏺ I'll start by looking at the repository layout.
+
+⏺ Search(pattern: "**/*.sh")
+  ⎿  Found 2 files
+
+⏺ Read(README.md)
+  ⎿  Read 12 lines
+
+✻ Thinking… (esc to interrupt)

@@ -1,0 +1,14 @@
+⏺ Do you want to proceed?
+  ⎿  Yes
+
+⏺ Bash(npm run build)
+  ⎿  > acme-api@1.0.0 build
+     > tsc -p tsconfig.build.json
+
+⏺ Build passed. Running the tests.
+
+⏺ Bash(npm test)
+  ⎿  Test Files  4 passed (4)
+     Tests  27 passed (27)
+
+✻ Working…

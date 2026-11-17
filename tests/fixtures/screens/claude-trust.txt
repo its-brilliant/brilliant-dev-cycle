@@ -1,0 +1,17 @@
+╭──────────────────────────────────────────────────────────────╮
+│                                                              │
+│  Do you trust the files in this folder?                      │
+│                                                              │
+│  /Users/you/src/acme-api                                     │
+│                                                              │
+│  Quick safety check: Is this a project you created or one    │
+│  you trust? (Like your own, or a colleague's). If not, take  │
+│  a moment to review what's in this folder first.             │
+│                                                              │
+│  Claude Code'll be able to read, edit, and execute files     │
+│  here.                                                       │
+│                                                              │
+│  ❯ 1. Yes, proceed                                           │
+│    2. No, exit                                               │
+│                                                              │
+╰──────────────────────────────────────────────────────────────╯
