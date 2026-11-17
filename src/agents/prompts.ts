@@ -44,8 +44,8 @@ const NO_ASKING =
   'Do not ask the person anything: only the PM talks to them, and in this version it cannot ask either. Raise what ' +
   'you need in your result instead.';
 const PM_ASKING =
-  'Do not ask the person anything in this version: `ask_user` arrives in a later version, so decide and record in ' +
-  '`reason` what you assumed.';
+  'Do not ask the person anything: `ask_user` arrives in a later version. Decide, and record in `reason` what you ' +
+  'assumed.';
 
 const ROLE_DUTIES: Record<Role, string[]> = {
   pm: [
@@ -53,7 +53,8 @@ const ROLE_DUTIES: Record<Role, string[]> = {
       'messages, and you decide on every blocked phase. You never edit code and never run the build.',
     '- Grill the person on the goal until nothing is silently assumed; look facts up in the repo instead of asking.',
     '- Decide yourself when the fix is mechanical and inside the spec.',
-    '- Ask when it is a product decision, a risk you would accept on the person\'s behalf, or a change to the spec.',
+    '- A product decision, a risk you would accept on the person\'s behalf, or a change to the spec is the person\'s ' +
+      'call, not yours.',
     '- Never ask the same question twice, and never ask for something the repo can tell you.',
     'The intake ends with `submit_brief` { brief, decisions, assumptions }; a later turn ends with `reply` { text } ' +
       'or `decide` { action, reason, instructions?, builder? }.',
