@@ -13,6 +13,7 @@ import { envFromProcess, isSubmitKind, submit as submitToInbox } from '../agents
 import { SUBMIT_TOOLS } from '../contracts/actors.js';
 import { ProjectConfig } from '../contracts/domain.js';
 import { runChat, streamTerminal } from './chat.js';
+import { defaultConfig, parseConfigJson, writeProjectConfig } from './init.js';
 import { connect, ensureDaemon, newRequestId, type DaemonClient } from '../daemon/client.js';
 import { latestRunId, projectPaths } from '../daemon/paths.js';
 import { ProjectRuns } from '../daemon/runs.js';
@@ -34,6 +35,7 @@ export interface CliIO {
 export class UsageError extends Error {}
 
 export const USAGE = `usage:
+  bdc init <dir> --config <json> | --print-defaults [--force]
   bdc start <dir> "<goal>"
   bdc daemon <dir> [--scripted]   (real agents unless --scripted)
   bdc chat <dir> [--run <id>]
@@ -46,8 +48,9 @@ export const USAGE = `usage:
   bdc submit <kind> [json | --file <path>]
   bdc herdr install|uninstall|check
 
-Starts runs and the project daemon, sends person events and prints run views (spec §7.2).
-Without --run a command uses the project's latest run.
+\`bdc init\` writes the project's bdc.yaml from a config as JSON, or prints the starting config
+with --print-defaults. Starts runs and the project daemon, sends person events and prints run
+views (spec §7.2). Without --run a command uses the project's latest run.
 \`bdc chat\` is the PM chat and the question tool in a terminal: /quit leaves, /status says where the
 run is. \`bdc say\` sends one message to the PM and exits.
 \`bdc mcp\` is the MCP server bdc attaches to an agent, and \`bdc submit\` the same submission for
@@ -66,6 +69,43 @@ const EXAMPLE_CONFIG = `agents:
 verification:
   checks:
     - run: npm test`;
+
+/**
+ * `bdc init <dir> --config <json>` writes `<dir>/bdc.yaml`; `--print-defaults` prints the starting
+ * config as JSON instead. The config is validated with `ProjectConfig` before anything is written,
+ * and an existing `bdc.yaml` is only replaced with `--force` (spec §3.1, §7.4, §10).
+ */
+export async function init(args: string[], io: CliIO): Promise<number> {
+  const printDefaults = args.includes('--print-defaults');
+  const force = args.includes('--force');
+  const { positional, flags } = parseArgs(
+    args.filter((arg) => arg !== '--print-defaults' && arg !== '--force'),
+    ['config'],
+  );
+  if (positional.length !== 1) throw new UsageError('init takes one project directory');
+  const dir = requireDir(positional[0], 'init');
+  if (printDefaults && flags.config !== undefined) {
+    throw new UsageError('init takes --config or --print-defaults, not both');
+  }
+  if (printDefaults) {
+    io.out(`${JSON.stringify(defaultConfig(), null, 2)}\n`);
+    return 0;
+  }
+  const json = flags.config;
+  if (json === undefined) throw new UsageError('init needs --config <json>, or --print-defaults for a starting config');
+  const parsed = parseConfigJson(json);
+  if (!parsed.ok) {
+    io.err(`bdc: the config is not a project config:\n${parsed.problems.map((problem) => `  ${problem}`).join('\n')}\n`);
+    return 1;
+  }
+  const written = writeProjectConfig(dir, parsed.config, { force });
+  if (!written.ok) {
+    io.err(`bdc: ${written.error}\n`);
+    return 1;
+  }
+  io.out(`wrote ${written.file}\n`);
+  return 0;
+}
 
 /** Send one person event. Silence on success: the caller sees the effect in `status`/`watch`. */
 export async function send(args: string[]): Promise<number> {
@@ -379,7 +419,7 @@ function readProjectConfig(file: string): ProjectConfig {
     text = fs.readFileSync(file, 'utf8');
   } catch {
     throw new UsageError(
-      `no bdc.yaml in ${path.dirname(file)}. \`bdc init\` comes in a later slice; write one by hand:\n\n${EXAMPLE_CONFIG}`,
+      `no bdc.yaml in ${path.dirname(file)}. Write one with \`bdc init ${path.dirname(file)} --print-defaults\` (piped to --config), or by hand:\n\n${EXAMPLE_CONFIG}`,
     );
   }
   let raw: unknown;
