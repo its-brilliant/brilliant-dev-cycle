@@ -12,6 +12,7 @@ import { PM_KINDS, serveMcp } from '../agents/mcp-server.js';
 import { envFromProcess, isSubmitKind, submit as submitToInbox } from '../agents/submit.js';
 import { SUBMIT_TOOLS } from '../contracts/actors.js';
 import { ProjectConfig } from '../contracts/domain.js';
+import { runChat, streamTerminal } from './chat.js';
 import { connect, ensureDaemon, newRequestId, type DaemonClient } from '../daemon/client.js';
 import { latestRunId, projectPaths } from '../daemon/paths.js';
 import { ProjectRuns } from '../daemon/runs.js';
@@ -32,6 +33,8 @@ export class UsageError extends Error {}
 export const USAGE = `usage:
   bdc start <dir> "<goal>"
   bdc daemon <dir> [--scripted]   (real agents unless --scripted)
+  bdc chat <dir> [--run <id>]
+  bdc say <dir> "<text>" [--run <id>]
   bdc send <dir> <EVENT_TYPE> [json-payload] [--run <id>]
   bdc status <dir> [--run <id>]
   bdc runs <dir>
@@ -41,6 +44,8 @@ export const USAGE = `usage:
 
 Starts runs and the project daemon, sends person events and prints run views (spec §7.2).
 Without --run a command uses the project's latest run.
+\`bdc chat\` is the PM chat and the question tool in a terminal: /quit leaves, /status says where the
+run is. \`bdc say\` sends one message to the PM and exits.
 \`bdc mcp\` is the MCP server bdc attaches to an agent, and \`bdc submit\` the same submission for
 a CLI without MCP; both read the AGENT_ENV bdc starts the agent with, so they only work inside a job.`;
 
@@ -70,6 +75,54 @@ export async function send(args: string[]): Promise<number> {
   try {
     const response = await client.request({ id: newRequestId(), type: 'send', runId, event });
     if (!response.ok) throw new Error(`the daemon refused the event: ${response.error}`);
+    return 0;
+  } finally {
+    client.close();
+  }
+}
+
+/**
+ * `bdc chat <dir> [--run <id>]`: the PM chat and the question tool in a terminal (spec §3.4, §9.4),
+ * until the Herdr panel exists. It only reads the view and sends person events; `chat.ts` runs it.
+ */
+export async function chat(args: string[], io: CliIO): Promise<number> {
+  const { positional, flags } = parseArgs(args, ['run']);
+  if (positional.length > 1) throw new UsageError('chat takes one project directory');
+  const dir = requireDir(positional[0], 'chat');
+  const runId = flags.run ?? requireLatestRun(dir);
+
+  const client = await connectToDaemon(dir);
+  const terminal = streamTerminal();
+  try {
+    return await runChat({
+      client,
+      runId,
+      out: io.out,
+      err: io.err,
+      terminal,
+      columns: process.stdout.columns,
+      signal: io.signal,
+    });
+  } finally {
+    terminal.close();
+    client.close();
+  }
+}
+
+/** `bdc say <dir> "<text>" [--run <id>]`: one message to the PM, then exit (spec §4.7). */
+export async function say(args: string[], _io: CliIO): Promise<number> {
+  const { positional, flags } = parseArgs(args, ['run']);
+  if (positional.length > 2) throw new UsageError('say takes a project directory and one message');
+  const dir = requireDir(positional[0], 'say');
+  const text = positional[1]?.trim() ?? '';
+  if (text === '') throw new UsageError('say needs a message, in quotes');
+  const runId = flags.run ?? requireLatestRun(dir);
+
+  const client = await connectToDaemon(dir);
+  try {
+    const event = { type: 'MESSAGE', text };
+    const response = await client.request({ id: newRequestId(), type: 'send', runId, event });
+    if (!response.ok) throw new Error(`the daemon refused the message: ${response.error}`);
     return 0;
   } finally {
     client.close();
