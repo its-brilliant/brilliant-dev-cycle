@@ -3,7 +3,8 @@
 // (screens/plan.js is what draws the cards and the lines).
 
 /** A phase card's size in px, and the space between cards and between columns. */
-export const CARD = { width: 196, height: 78 };
+// Four rows (id, title, counts, proof pills) and their gaps need 100px; 78 cut the last row off.
+export const CARD = { width: 196, height: 100 };
 export const SPACING = { pad: 16, gapX: 56, gapY: 28 };
 
 /**

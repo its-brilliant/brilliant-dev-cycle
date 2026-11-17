@@ -150,6 +150,8 @@ function blockRow(t, ctx, block, comments, readOnly) {
   const segments = highlightSegments(block.text, comments);
   return h_flex()
     .id(`bdc-spec-block-${block.id}`)
+    // A column's children keep their own width in GPUI: without this the spec wrapped at ~300px.
+    .w_full()
     .gap(8)
     .items_start()
     .rounded(4)
@@ -240,7 +242,11 @@ function commentColumn(t, ctx, comments, readOnly) {
   const open = openCount(comments);
   return v_flex()
     .id("bdc-spec-comments")
-    .w(330)
+    // The spec is what the person reads: comments take a third of the main area, never more than 330.
+    // (A fixed 330 left the spec half of a 660px main area beside PM chat.)
+    .w_1_3()
+    .max_w(330)
+    .min_w(200)
     .flex_none()
     .min_h(0)
     .gap(8)

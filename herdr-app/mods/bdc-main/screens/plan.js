@@ -121,10 +121,12 @@ function writing(t, ctx) {
 function body(t, ctx, phases, readOnly) {
   const layout = dagLayout(phases);
   const selected = phases.find((phase) => phase.id === ctx.state.selected) ?? null;
+  // gpui-base's h_flex centres its children vertically: the graph floated mid-screen until items_start.
   return h_flex()
     .flex_1()
     .min_h(0)
     .gap(10)
+    .items_start()
     .child(
       v_flex()
         .flex_1()
@@ -140,10 +142,14 @@ function body(t, ctx, phases, readOnly) {
           ),
         )
         .child(
-          div()
+          // A column, so the graph sits at the top; a plain div centred it in the space left over.
+          v_flex()
             .id("bdc-plan-canvas")
-            .flex_1()
-            .min_h(0)
+            // A definite height: in a flex chain a scroll area laid out at zero (AGENTS.md), and when
+            // grown to fill the space it centred the graph. The graph's own height, up to 560 (then it scrolls).
+            .flex_none()
+            .h(Math.min(layout.height + 16, 560))
+            .w_full()
             .overflow_x_scrollbar()
             .overflow_y_scrollbar()
             .child(
@@ -200,8 +206,10 @@ function phaseCard(t, ctx, card) {
         .child(div().flex_1())
         .when(phase.deps.length > 0, (row) => row.child(div().font_family(t.mono).text_size(t.type.tiny).text_color(t.colors.dim).child(`after ${phase.deps.join(", ")}`))),
     )
-    .child(div().text_size(12.5).font_semibold().text_color(t.colors.fg).truncate().child(phase.title))
-    .child(div().text_size(t.type.small).text_color(t.colors.muted).child(`${countWords(phase.tasks.length, "task")} · ${countWords(phase.checks.length, "check")}`))
+    // truncate() needs a width to cut against; without one the title collapsed to nothing.
+    // flex_none: in a fixed-height card the rows shrank, and the title was cut to half its height.
+    .child(div().flex_none().w_full().text_size(12.5).font_semibold().text_color(t.colors.fg).truncate().child(phase.title))
+    .child(div().flex_none().text_size(t.type.small).text_color(t.colors.muted).child(`${countWords(phase.tasks.length, "task")} · ${countWords(phase.checks.length, "check")}`))
     .child(
       h_flex()
         .gap(4)
