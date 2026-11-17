@@ -213,7 +213,6 @@ const RunInputFile = z.object({ goal: z.string(), config: z.object({ base: z.str
 
 interface RunData {
   view: RunView;
-  goal: string;
   base: string;
 }
 
@@ -236,7 +235,9 @@ function readRun(root: string, runId: string): RunData {
     throw new Error(`bdc cannot read the run's input (${inputFile}): ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  return { view, goal: input.goal, base: input.config.base };
+  // The goal the person typed is in input.json; the projection copies it, and bdc ships the person's
+  // own words even if the two ever drift.
+  return { view: { ...view, goal: input.goal }, base: input.config.base };
 }
 
 /**
@@ -276,19 +277,20 @@ function writeFileTarget(input: OpenPullRequestInput, run: RunData, relative: st
   const file = path.resolve(input.root, relative);
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
+  const files = proofFiles(input.root, run.view);
   const body = pullRequestBody(run.view, {
     base: run.base,
     runBranch: input.runBranch,
     draft: input.draft,
     proofHref: (proof) => {
-      const item = proofFiles(input.root, run.view).find((candidate) => candidate.item.file === proof);
-      return item?.found == null ? null : path.relative(dir, item.found);
+      const found = files.find((candidate) => candidate.item.file === proof)?.found;
+      return found == null ? null : path.relative(dir, found);
     },
   });
   fs.writeFileSync(file, body);
 
   const listFile = file.replace(/\.md$/i, '') + '.proof.json';
-  const list = proofFiles(input.root, run.view).map(({ phase, item, found }) => ({
+  const list = files.map(({ phase, item, found }) => ({
     phase: phase.title,
     kind: item.kind,
     shows: item.shows,
@@ -447,8 +449,7 @@ async function openGithubTarget(ctx: PrContext, input: OpenPullRequestInput, run
       draft: input.draft,
       // The body names the proof items; the pictures are in the phase comments below.
     });
-    const title = pullRequestTitle({ ...run.view, goal: run.goal });
-    const args = ['pr', 'create', '--base', run.base, '--head', input.runBranch, '--title', title];
+    const args = ['pr', 'create', '--base', run.base, '--head', input.runBranch, '--title', pullRequestTitle(run.view)];
     url = await withTempFile('body.md', body, async (file) => {
       const full = [...args, '--body-file', file];
       // The person's choice on the Ship screen (§4.6) decides draft or ready; the target's `draft`
