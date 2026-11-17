@@ -11,9 +11,9 @@
  * Why the low-level `Server` and not `McpServer`: `McpServer.registerTool` validates the arguments
  * with the tool's schema *before* the handler and answers with the SDK's own message, so a rejected
  * submission would never reach bdc and could not carry bdc's problems — the same `path: message`
- * lines `bdc submit` prints, which is what the agent needs to fix its payload. Owning the two
- * request handlers lets bdc advertise the schema from SUBMISSIONS and still answer a rejection in
- * bdc's words.
+ * lines `bdc submit` prints, which is what the agent needs to fix its payload. Owning the request
+ * handlers lets bdc advertise the schema from SUBMISSIONS and still answer a rejection in bdc's
+ * words.
  */
 import fs from 'node:fs';
 import path from 'node:path';

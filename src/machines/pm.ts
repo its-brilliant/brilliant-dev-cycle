@@ -99,13 +99,13 @@ const notProvided = (name: string): AnyActorLogic =>
 
 // ── Prompts (§4.1, §6): pure, so the shape of every turn is testable ────────────────────
 
-/** The intake turn: grill the person through `ask_user`, then `submit_brief` (§4.1). */
 /**
  * Whether the question tool is attached to the PM (§3.4). It is: the PM asks the person through
  * `ask_user`, which returns at once and brings the answers back as the PM's next message.
  */
 export const ASK_USER_AVAILABLE = true;
 
+/** The intake turn: grill the person through `ask_user`, then `submit_brief` (§4.1). */
 export function intakePrompt(goal: string, askUser = ASK_USER_AVAILABLE): string {
   if (!askUser) {
     return [
@@ -185,6 +185,9 @@ export function answeredNote(askId: string, answers: Answer[]): string {
   return `The person answered ask ${askId}: ${said || '(nothing)'}.`;
 }
 
+/** What a skipped question says: the decision is the PM's, and it says so (§3.4). */
+const SKIPPED_ANSWER = 'skipped (decide yourself and say so in assumptions)';
+
 /**
  * One answer in the person's words: the labels of the options they picked, the text they typed, or
  * that they left the decision to the PM (§3.4, §9.4).
@@ -198,8 +201,6 @@ export function answerWords(question: Question | undefined, answer: Answer): str
   if (typed !== '') return typed;
   return SKIPPED_ANSWER;
 }
-
-const SKIPPED_ANSWER = 'skipped (decide yourself and say so in assumptions)';
 
 /** The person's answers to a round, one line each, as the run's chat shows them (§7.2, §9.4). */
 export function answersInWords(questions: Question[], answers: Answer[]): string {
