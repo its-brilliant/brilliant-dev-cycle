@@ -364,6 +364,23 @@ describe('hcEffects.launchAgent', () => {
     expect(outcome.status === 'failed' ? outcome.detail : '').toContain('hc ls failed');
     expect(outcome.status === 'failed' ? outcome.detail : '').toContain('hc ls is broken');
   });
+
+  it('fails the job, with a detail a person can act on, when hc is not installed', async () => {
+    const dir = tempDir();
+    const effects = hcEffects({
+      hcBin: path.join(dir, 'no-such-hc'),
+      commandFor,
+      pollMs: 10,
+      root: path.join(dir, 'acme-api'),
+      runId: RUN_ID,
+    });
+
+    const harness = startAgent(effects, job());
+    const outcome = await until('the failed result', () => outcomes(harness)[0]);
+
+    expect(outcome.status).toBe('failed');
+    expect(outcome.status === 'failed' ? outcome.detail : '').toContain('hc is not installed or not runnable');
+  });
 });
 
 describe('hcEffects.observeAgent', () => {
