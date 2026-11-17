@@ -64,14 +64,15 @@ export function fileLine(finding) {
 
 /**
  * Every finding of the run in one list (§8.1): the whole-run review's first, then each phase's,
- * each with the phase it came from (`phaseId` "" for the whole run, `where` for people).
+ * each with where it came from. `phaseKey` is what the phase filter matches: the phase id, or
+ * "run" for the whole run (an empty filter value means "all", so it cannot also mean the run).
  */
 export function allFindings(view) {
   const rows = [];
   const run = view.finalFindings ?? [];
-  run.forEach((finding, index) => rows.push({ key: `run-${index}`, finding, where: "whole run", phaseId: "" }));
+  run.forEach((finding, index) => rows.push({ key: `run-${index}`, finding, where: "whole run", phaseId: "", phaseKey: "run" }));
   for (const phase of view.phases ?? []) {
-    phase.findings.forEach((finding, index) => rows.push({ key: `${phase.id}-${index}`, finding, where: phase.title, phaseId: phase.id }));
+    phase.findings.forEach((finding, index) => rows.push({ key: `${phase.id}-${index}`, finding, where: phase.title, phaseId: phase.id, phaseKey: phase.id }));
   }
   return rows;
 }
@@ -82,7 +83,7 @@ export function filterValues(rows) {
   const phase = [];
   for (const row of rows) {
     if (!lens.includes(row.finding.lens)) lens.push(row.finding.lens);
-    if (!phase.some((value) => value.id === row.phaseId)) phase.push({ id: row.phaseId, label: row.where });
+    if (!phase.some((value) => value.id === row.phaseKey)) phase.push({ id: row.phaseKey, label: row.where });
   }
   return {
     lens,
@@ -101,7 +102,7 @@ export function filterFindings(rows, filters = {}) {
   return rows.filter(
     (row) =>
       wanted(row.finding.lens, filters.lens) &&
-      wanted(row.phaseId, filters.phase) &&
+      wanted(row.phaseKey, filters.phase) &&
       wanted(row.finding.severity, filters.severity) &&
       wanted(row.finding.status, filters.status) &&
       (filters.onlyBlocking !== true || blocksNow(row.finding)),

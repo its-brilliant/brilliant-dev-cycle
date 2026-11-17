@@ -395,6 +395,7 @@ describe('the Reviews list', () => {
     expect(ids({ lens: 'security' }).sort()).toEqual(['SEC-1', 'SEC-2', 'SEC-3', 'SEC-4', 'SEC-7']);
     expect(ids({ phase: 'p3' })).toEqual(['PERF-1', 'SEC-2', 'UX-1']);
     expect(ids({ phase: '' })).toHaveLength(rows.length);
+    expect(ids({ phase: 'run' })).toEqual(['SEC-7', 'DOC-1']);
     expect(ids({ severity: 'critical' })).toEqual(['SEC-2']);
     expect(ids({ status: 'fixing' }).sort()).toEqual(['UX-1', 'UX-2']);
     expect(ids({ onlyBlocking: true }).sort()).toEqual(['PERF-1', 'SEC-2', 'SEC-7', 'UX-1', 'UX-2']);
@@ -407,7 +408,7 @@ describe('the Reviews list', () => {
     expect(values.lens.sort()).toEqual(['docs', 'perf', 'security', 'ux']);
     expect(values.severity).toEqual(SEVERITIES);
     expect(values.status).toEqual(FINDING_STATUSES);
-    expect(values.phase.map((candidate) => candidate.id)).toEqual(['', 'p1', 'p3', 'p9', 'p13', 'p14']);
+    expect(values.phase.map((candidate) => candidate.id)).toEqual(['run', 'p1', 'p3', 'p9', 'p13', 'p14']);
     expect(values.phase[0]?.label).toBe('whole run');
     expect(filterValues([])).toEqual({ lens: [], phase: [], severity: [], status: [] });
   });

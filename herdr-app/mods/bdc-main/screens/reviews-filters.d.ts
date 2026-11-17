@@ -32,6 +32,8 @@ export interface FindingRow {
   finding: FindingLike;
   where: string;
   phaseId: string;
+  /** What the phase filter matches: the phase id, or "run" for the whole-run review. */
+  phaseKey: string;
 }
 
 /** What the person asked to see; a missing or empty value is "all". */
