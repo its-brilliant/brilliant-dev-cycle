@@ -20,7 +20,8 @@ export function render(view, ctx) {
   const spec = view?.spec ?? null;
   const comments = spec?.comments ?? [];
   const drafting = view?.stage === "specDrafting";
-  const readOnly = ctx.readOnly === true || drafting;
+  // Nothing to approve or comment on until the first draft is here (§9.1 rule 3).
+  const readOnly = ctx.readOnly === true || drafting || spec === null;
   return v_flex()
     .id("bdc-spec")
     .flex_1()
@@ -38,7 +39,7 @@ export function render(view, ctx) {
           .min_h(0)
           .gap(12)
           .child(documentColumn(t, ctx, spec, comments, readOnly))
-          .child(commentColumn(t, ctx, spec, comments, readOnly)),
+          .child(commentColumn(t, ctx, comments, readOnly)),
       ),
     );
 }
@@ -56,7 +57,7 @@ function toolbar(t, ctx, { spec, comments, drafting, readOnly }) {
     .child(t.label(ctx.view?.stageWords ?? "Writing the spec", { color: t.colors.dim, size: t.type.small, wrap: false }))
     .child(div().flex_1());
   if (readOnly) {
-    row.child(t.label(drafting ? "The spec writer has the pen." : "The run has moved past the spec, so this is read-only.", { color: t.colors.dim, size: t.type.small }));
+    row.child(t.label(readOnlyWords({ spec, drafting, readOnly: ctx.readOnly === true }), { color: t.colors.dim, size: t.type.small }));
     return row;
   }
   if (ctx.state.requesting === true) {
@@ -105,6 +106,14 @@ function toolbar(t, ctx, { spec, comments, drafting, readOnly }) {
   return row
     .child(t.button("Request changes", { id: "bdc-spec-request-changes" }).on_click((_event, cx) => openRequest(ctx, cx)))
     .child(t.button("Approve spec", { id: "bdc-spec-approve", primary: true }).on_click((_event, cx) => sendEvent(ctx, { type: "SPEC_APPROVED" }, cx)));
+}
+
+/** Why the two buttons are not here, in words (§9.1 rule 3). */
+function readOnlyWords({ spec, drafting, readOnly }) {
+  if (drafting) return "The spec writer has the pen.";
+  if (spec === null) return "There is no draft to review yet.";
+  if (readOnly) return "The run has moved past the spec, so this is read-only.";
+  return "The spec is read-only for now.";
 }
 
 /** No spec yet: what the spec writer is doing, in the run's own words (§9.1 rule 4). */
@@ -160,10 +169,10 @@ function blockRow(t, ctx, block, comments, readOnly) {
 /** The block's text, split around the quotes its comments anchor to so each quote gets a background. */
 function blockParts(t, block, segments) {
   const parts = segments.filter((segment) => segment.text !== "");
-  if (parts.length <= 1) return [TextView.markdown(block.id, block.text)];
+  if (parts.length <= 1) return [TextView.markdown(`bdc-spec-${block.id}`, block.text)];
   return parts.map((segment, index) =>
     segment.commentId === null
-      ? TextView.markdown(`${block.id}-${index}`, segment.text)
+      ? TextView.markdown(`bdc-spec-${block.id}-${index}`, segment.text)
       : div()
           .id(`bdc-spec-quote-${block.id}-${index}`)
           .rounded(3)
@@ -216,7 +225,7 @@ function commentEditor(t, ctx, block) {
         .child(
           t
             .button("Add comment", { id: "bdc-spec-add-comment", primary: true, disabled: !typed, reason: "Type the comment first" })
-            .on_click((_event, cx) => addComment(ctx, block, cx)),
+            .on_click((_event, cx) => addComment(ctx, cx)),
         )
         .child(t.button("Cancel", { id: "bdc-spec-comment-cancel" }).on_click((_event, cx) => closeComment(ctx, cx)))
         .when(!typed, (row) => row.child(t.label("Type the comment, then Add comment.", { color: t.colors.dim, size: t.type.small }))),
@@ -225,7 +234,7 @@ function commentEditor(t, ctx, block) {
 
 // ── the comments ────────────────────────────────────────────────────────────────────────────
 
-function commentColumn(t, ctx, spec, comments, readOnly) {
+function commentColumn(t, ctx, comments, readOnly) {
   const threads = commentThreads(comments);
   const open = openCount(comments);
   return v_flex()
@@ -335,7 +344,7 @@ function closeComment(ctx, cx) {
   ctx.setState({ editing: false, commentBlock: "", body: "", hover: "" }, cx);
 }
 
-function addComment(ctx, block, cx) {
+function addComment(ctx, cx) {
   const editor = ctx.inputs["spec.block"];
   const body = String(ctx.state.body ?? "").trim();
   if (editor === undefined || body === "") return;

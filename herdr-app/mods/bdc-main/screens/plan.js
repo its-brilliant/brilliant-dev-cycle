@@ -18,7 +18,8 @@ export function render(view, ctx) {
   const plan = view?.plan ?? null;
   const phases = plan?.phases ?? [];
   const planning = view?.stage === "planning";
-  const readOnly = ctx.readOnly === true || planning;
+  // Nothing to approve until there is a plan (§9.1 rule 3).
+  const readOnly = ctx.readOnly === true || planning || plan === null;
   return v_flex()
     .id("bdc-plan")
     .flex_1()
@@ -45,7 +46,7 @@ function toolbar(t, ctx, { phases, planning, readOnly }) {
     .child(t.label(ctx.view?.stageWords ?? "Writing the plan", { color: t.colors.dim, size: t.type.small, wrap: false }))
     .child(div().flex_1());
   if (readOnly) {
-    row.child(t.label(planning ? "The planner has the pen." : "The run has moved past the plan, so this is read-only.", { color: t.colors.dim, size: t.type.small }));
+    row.child(t.label(readOnlyWords({ phases, planning, readOnly: ctx.readOnly === true }), { color: t.colors.dim, size: t.type.small }));
     return row;
   }
   if (ctx.state.requesting === true) {
@@ -93,6 +94,14 @@ function toolbar(t, ctx, { phases, planning, readOnly }) {
   return row
     .child(t.button("Request changes", { id: "bdc-plan-request-changes" }).on_click((_event, cx) => openRequest(ctx, cx)))
     .child(t.button("Approve plan", { id: "bdc-plan-approve", primary: true }).on_click((_event, cx) => sendEvent(ctx, { type: "PLAN_APPROVED" }, cx)));
+}
+
+/** Why the two buttons are not here, in words (§9.1 rule 3). */
+function readOnlyWords({ phases, planning, readOnly }) {
+  if (planning) return "The planner has the pen.";
+  if (phases.length === 0) return "There is no plan to review yet.";
+  if (readOnly) return "The run has moved past the plan, so this is read-only.";
+  return "The plan is read-only for now.";
 }
 
 /** No plan yet: what the planner is doing, in the run's own words (§9.1 rule 4). */
@@ -152,7 +161,6 @@ function body(t, ctx, phases, readOnly) {
 
 /** One 1px piece of an edge: the lines that say which phase waits on which. */
 function edgeLine(t, edge, segment, edgeIndex, segmentIndex) {
-  const selected = false;
   return div()
     .id(`bdc-plan-edge-${edgeIndex}-${segmentIndex}`)
     .absolute()
@@ -160,7 +168,7 @@ function edgeLine(t, edge, segment, edgeIndex, segmentIndex) {
     .top(segment.top)
     .w(segment.width)
     .h(segment.height)
-    .bg(selected ? t.colors.accent : t.colors.input);
+    .bg(t.colors.input);
 }
 
 /** One phase: its id, what it builds, and how much of it there is. Clicking it opens the inspector. */

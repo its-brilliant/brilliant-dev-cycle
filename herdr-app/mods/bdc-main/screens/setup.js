@@ -246,7 +246,7 @@ function copyRole(ctx, role, from, cx) {
 }
 
 function openModel(ctx, role, chosen, cx) {
-  fieldInput(ctx, "setup.model", chosen.model, cx);
+  fieldInput(ctx, "setup.model", chosen.model, cx).focus();
   ctx.setState({ modelFor: role }, cx);
 }
 
@@ -260,7 +260,7 @@ function commitModel(ctx, role, cx) {
 
 function lensCard(t, ctx, form) {
   const adding = ctx.state.addingLens === true;
-  return t.card(
+  const rows = [
     t.section("Review lenses"),
     t.label("One reviewer per lens, each with the prompt you write for it. Every phase is reviewed through every lens; a lens blocks from the level it names."),
     h_flex()
@@ -292,8 +292,11 @@ function lensCard(t, ctx, form) {
         ),
       ),
     adding ? addLensRow(t, ctx) : t.button("Add lens", { id: "bdc-setup-add-lens" }).on_click((_event, cx) => openLens(ctx, cx)),
-    ctx.state.lensError !== undefined && ctx.state.lensError !== "" ? div().text_size(t.type.small).text_color(t.colors.blocked).child(ctx.state.lensError) : div(),
-  );
+  ];
+  if (ctx.state.lensError !== undefined && ctx.state.lensError !== "") {
+    rows.push(div().text_size(t.type.small).text_color(t.colors.blocked).child(ctx.state.lensError));
+  }
+  return t.card(...rows);
 }
 
 function addLensRow(t, ctx) {
@@ -322,7 +325,7 @@ function addLensRow(t, ctx) {
 }
 
 function openLens(ctx, cx) {
-  fieldInput(ctx, "setup.lens", "", cx);
+  fieldInput(ctx, "setup.lens", "", cx).focus();
   ctx.setState({ addingLens: true, lensError: "" }, cx);
 }
 
@@ -343,7 +346,7 @@ function verificationCard(t, ctx, form) {
     return t.card(...rows);
   }
   if (form.checks.length === 0) rows.push(t.label("No checks yet.", { color: t.colors.dim, size: t.type.small }));
-  for (const check of form.checks) {
+  form.checks.forEach((check, index) => {
     rows.push(
       h_flex()
         .gap(8)
@@ -351,16 +354,16 @@ function verificationCard(t, ctx, form) {
         .child(div().flex_1().min_w(0).font_family(t.mono).text_size(t.type.small).text_color(t.colors.fg).child(check))
         .child(
           div()
-            .id(`bdc-setup-check-remove-${form.checks.indexOf(check)}`)
+            .id(`bdc-setup-check-remove-${index}`)
             .cursor_pointer()
             .text_size(t.type.small)
             .text_color(t.colors.dim)
             .hover((style) => style.text_color(t.colors.blocked))
             .child("×")
-            .on_click((_event, cx) => ctx.setState({ checks: form.checks.filter((other) => other !== check) }, cx)),
+            .on_click((_event, cx) => ctx.setState({ checks: form.checks.filter((_, at) => at !== index) }, cx)),
         ),
     );
-  }
+  });
   rows.push(ctx.state.addingCheck === true ? addCheckRow(t, ctx) : t.button("Add check", { id: "bdc-setup-add-check" }).on_click((_event, cx) => openCheck(ctx, cx)));
   rows.push(
     t
@@ -396,7 +399,7 @@ function addCheckRow(t, ctx) {
 }
 
 function openCheck(ctx, cx) {
-  fieldInput(ctx, "setup.check", "", cx);
+  fieldInput(ctx, "setup.check", "", cx).focus();
   ctx.setState({ addingCheck: true }, cx);
 }
 
