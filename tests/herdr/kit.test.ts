@@ -115,7 +115,7 @@ describe('which project and run the UI shows', () => {
     const read: Array<{ file: string; on: string | null | undefined }> = [];
     const ran: string[][] = [];
     const host: ProjectHost = {
-      spaces: () => [{ id: 's2', active: true, folder: '/work/app', machine: 'laptop' }],
+      spaces: () => [{ id: 's2', active: true, name: 'My app', folder: '/work/app', machine: 'laptop' }],
       shared: () => null,
       readTextFile: (file, options) => {
         read.push({ file, on: options?.on });
@@ -131,14 +131,16 @@ describe('which project and run the UI shows', () => {
       root: '/work/app',
       machine: 'laptop',
       space: 's2',
-      name: 'app',
+      // The space's own name, not the folder's.
+      name: 'My app',
+      configured: true,
       runId: 'run-9',
     });
     expect(read).toEqual([{ file: '/work/app/bdc.yaml', on: 'laptop' }]);
     expect(ran).toEqual([['ls', '-1t', '/work/app/.herd/runs', 'laptop']]);
   });
 
-  it('is no project when the active space has no bdc.yaml', async () => {
+  it('is an unconfigured project when the active space has no bdc.yaml, so Setup knows the folder', async () => {
     const host: ProjectHost = {
       spaces: () => [{ id: 's1', active: true, folder: '/work/app' }],
       shared: () => null,
@@ -146,7 +148,7 @@ describe('which project and run the UI shows', () => {
       exec: () => Promise.resolve({ code: 0, stdout: '', stderr: '' }),
     };
 
-    await expect(resolveProject(host)).resolves.toBeNull();
+    await expect(resolveProject(host)).resolves.toEqual({ root: '/work/app', machine: null, space: 's1', name: 'app', configured: false, runId: null });
   });
 
   it('is no run yet when the project has no runs folder', async () => {
@@ -157,11 +159,11 @@ describe('which project and run the UI shows', () => {
       exec: () => Promise.reject(new Error('ls: /work/app/.herd/runs: No such file or directory')),
     };
 
-    await expect(resolveProject(host)).resolves.toEqual({ root: '/work/app', machine: null, space: 's1', name: 'app', runId: null });
+    await expect(resolveProject(host)).resolves.toEqual({ root: '/work/app', machine: null, space: 's1', name: 'app', configured: true, runId: null });
   });
 
   it('knows when the target did not change', () => {
-    const target = { root: '/work/app', machine: null, space: 's1', name: 'app', runId: 'run-1' };
+    const target = { root: '/work/app', machine: null, space: 's1', name: 'app', configured: true, runId: 'run-1' };
 
     expect(sameTarget(target, { ...target })).toBe(true);
     expect(sameTarget(target, { ...target, runId: 'run-2' })).toBe(false);

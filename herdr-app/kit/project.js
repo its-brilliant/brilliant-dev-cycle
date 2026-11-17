@@ -54,13 +54,16 @@ export async function resolveProject(host) {
   if (space === null || typeof space.folder !== 'string' || space.folder === '') return null;
   const machine = space.machine ?? null;
   const config = await host.readTextFile(join(space.folder, 'bdc.yaml'), { on: machine });
-  if (config === null) return null;
+  // A folder without bdc.yaml is still the project on screen: Setup writes its bdc.yaml there.
+  const configured = config !== null;
   return {
     root: space.folder,
     machine,
     space: space.id,
-    name: projectName(space.folder),
-    runId: pickRun(await listRuns(host, space.folder, machine), host.shared('bdc.run')),
+    // The space's own name is what the person called it; the folder name is the fallback.
+    name: typeof space.name === 'string' && space.name.trim() !== '' ? space.name : projectName(space.folder),
+    configured,
+    runId: configured ? pickRun(await listRuns(host, space.folder, machine), host.shared('bdc.run')) : null,
   };
 }
 

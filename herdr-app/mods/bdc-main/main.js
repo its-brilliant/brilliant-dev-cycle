@@ -112,7 +112,7 @@ export default class BdcMain extends View {
     this.watcher = null;
     this.target = next;
     this.view = null;
-    this.open = { screen: next === null ? "setup" : next.runId === null ? "goal" : "intake", readOnly: false };
+    this.open = { screen: next === null || !next.configured ? "setup" : next.runId === null ? "goal" : "intake", readOnly: false };
     this.follow = true;
     this.confirmingCancel = false;
     if (next !== null && next.runId !== null) this.watcher = watchRun(host, cx, next, (view) => this.onView(view));
@@ -198,25 +198,32 @@ export default class BdcMain extends View {
   header(t) {
     const view = this.view;
     const current = view === null ? -1 : stepOf(view.stage);
-    return h_flex()
+    // Two rows: the stepper gets the whole width, so all six steps fit next to PM chat (seen clipped
+    // at "Review" in the first visual check, with Pause and Cancel pushed out of sight).
+    return v_flex()
       .id("bdc-header")
       .flex_none()
-      .h(44)
       .px(14)
-      .gap(16)
-      .items_center()
+      .pt(8)
+      .pb(10)
+      .gap(8)
       .border_b(1)
       .border_color(t.colors.border)
-      .child(div().text_size(t.type.title).font_semibold().child(this.target?.name ?? "No project"))
-      .child(this.stepper(t, current))
-      .child(div().flex_1())
-      .children(this.actions(t));
+      .child(
+        h_flex()
+          .h(28)
+          .gap(8)
+          .items_center()
+          .child(div().flex_1().min_w(0).truncate().text_size(t.type.title).font_semibold().child(this.target?.name ?? "No project"))
+          .children(this.actions(t)),
+      )
+      .when(this.view !== null, (column) => column.child(this.stepper(t, current)));
   }
 
   stepper(t, current) {
     const steps = [];
     STEPS.forEach((label, index) => {
-      if (index > 0) steps.push(div().w(22).h(1).bg(t.colors.input));
+      if (index > 0) steps.push(div().flex_1().min_w(6).h(1).bg(t.colors.input));
       const done = current >= 0 && index < current;
       const isCurrent = index === current;
       const row = h_flex()
@@ -240,7 +247,7 @@ export default class BdcMain extends View {
       if (isCurrent && this.view !== null && this.view.needsYou) row.child(t.pill("needs you", "working"));
       steps.push(row);
     });
-    return h_flex().gap(8).items_center().children(steps);
+    return h_flex().w_full().gap(6).items_center().children(steps);
   }
 
   actions(t) {
@@ -309,7 +316,7 @@ export default class BdcMain extends View {
   }
 
   screen(t, cx) {
-    if (this.target === null) return this.renderScreen("setup", t, cx);
+    if (this.target === null || !this.target.configured) return this.renderScreen("setup", t, cx);
     if (this.target.runId === null) return this.renderScreen("goal", t, cx);
     if (this.view === null) {
       return v_flex().flex_1().min_h(0).p(16).child(t.label("Reading the run…", { color: t.colors.dim }));

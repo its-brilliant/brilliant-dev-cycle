@@ -203,7 +203,10 @@ export default class BdcPm extends View {
 
   body(t) {
     if (this.target === null) {
-      return this.empty(t, "Pick a project with a bdc.yaml", "The PM chat follows the project of the space you are in. Select a space whose folder has a bdc.yaml.");
+      return this.empty(t, "Pick a project", "The PM chat follows the project of the space you are in.");
+    }
+    if (!this.target.configured) {
+      return this.empty(t, "Set up bdc for this folder", "Choose the agents in the main area first; then the PM talks to you here.");
     }
     if (this.target.runId === null) {
       return this.empty(t, "Start a run from the main area", "Type a goal there and press Start; the PM will talk to you here.");
@@ -321,7 +324,8 @@ export default class BdcPm extends View {
       .p(10)
       .rounded(t.radii.card)
       .border(1)
-      .border_color(t.colors.blocked)
+      // Accent, not the error colour: a question for the person is not something that went wrong.
+      .border_color(t.colors.accent)
       .bg(t.colors.popover)
       .track_focus(this.handle)
       .on_key_down((event, cx) => {
@@ -399,9 +403,11 @@ export default class BdcPm extends View {
     // Back is only there when there is a question behind this one (§9.1 rule 3).
     if (state.screen > 0) row.child(t.button("Back", { id: "pm-back" }).on_click((_event, cx) => this.pressCard(BACK, cx)));
     row.child(t.button("Skip", { id: "pm-skip" }).on_click((_event, cx) => this.pressCard(SKIP, cx)));
-    row.child(div().flex_1());
-    row.child(div().text_size(t.type.tiny).text_color(t.colors.dim).child(cardHint(question, state)));
-    return row;
+    // The key hint gets its own line, so it wraps in a narrow chat instead of running off the edge.
+    return v_flex()
+      .gap(6)
+      .child(row)
+      .child(div().w_full().text_size(t.type.tiny).text_color(t.colors.dim).child(cardHint(question, state)));
   }
 
   summaryRow(t, question, answer) {
@@ -457,7 +463,7 @@ export default class BdcPm extends View {
         h_flex()
           .items_center()
           .gap(8)
-          .child(div().flex_1().text_size(t.type.tiny).text_color(t.colors.dim).child("Enter sends. @phase and #task scope a message."))
+          .child(div().flex_1().text_size(t.type.tiny).text_color(t.colors.dim).child("Enter sends."))
           .child(div().text_size(t.type.tiny).text_color(t.colors.dim).child(plural((this.view?.chat ?? []).length, "message"))),
       );
   }

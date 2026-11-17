@@ -14,6 +14,8 @@ export interface ProjectTarget {
   machine: string | null;
   space: string;
   name: string;
+  /** Whether the folder has a bdc.yaml; without one the main area shows Setup. */
+  configured: boolean;
   runId: string | null;
 }
 
