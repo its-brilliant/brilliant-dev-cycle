@@ -73,7 +73,7 @@ export async function runChat(options: ChatOptions): Promise<number> {
     }
   })();
 
-  /** The next key, or null when the person interrupted or the input ended. */
+  /** The next key, or null when the person interrupted or the input ended. A card owns the keys, so it waits for them alone. */
   const nextKey = async (): Promise<string | null> => {
     for (;;) {
       if (session.stopped) return null;
@@ -172,8 +172,13 @@ export async function runChat(options: ChatOptions): Promise<number> {
         }
       }
 
-      const key = await nextKey();
-      if (key === null) return 0;
+      // A new view or a key: either way the whole screen is looked at again.
+      const key = keys.shift();
+      if (key === undefined) {
+        await wake.wait();
+        continue;
+      }
+      if (key === END_OF_INPUT) return 0;
       if (key === 'enter') {
         const text = line.trim();
         line = '';
