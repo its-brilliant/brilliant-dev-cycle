@@ -66,26 +66,28 @@ function problemWith(item: ProofItem, base: string): string | null {
   const file = item.file?.trim() ?? '';
   if (file === '') return `the ${item.kind} proof does not name a file`;
   const full = path.isAbsolute(file) ? file : path.resolve(base, file);
-  let size: number;
+  if (!fs.existsSync(full)) return `${file} is not there`;
+  // Everything below touches the file, and a proof item is somebody else's file: it can vanish or
+  // be unreadable between two calls. A reason is always better than a rejection, because the
+  // phase machine has no error branch on `checkProof` (src/machines/phase.ts).
   try {
     const stat = fs.statSync(full);
     if (!stat.isFile()) return `${file} is not a file`;
-    size = stat.size;
-  } catch {
-    return `${file} is not there`;
-  }
-  if (size === 0) return `${file} is empty`;
+    if (stat.size === 0) return `${file} is empty`;
 
-  switch (item.kind) {
-    case 'screenshot':
-      return isImage(full) ? null : `${file} is not an image (PNG, JPEG, WebP or GIF)`;
-    case 'recording':
-      return isVideo(full) ? null : `${file} is not a video (MP4, MOV, WebM) or a GIF`;
-    case 'tests':
-      return testReportProblem(full, file);
-    default:
-      // `log`, `e2e` and `walkthrough`: a non-empty file is the proof (see the module comment).
-      return null;
+    switch (item.kind) {
+      case 'screenshot':
+        return isImage(full) ? null : `${file} is not an image (PNG, JPEG, WebP or GIF)`;
+      case 'recording':
+        return isVideo(full) ? null : `${file} is not a video (MP4, MOV, WebM) or a GIF`;
+      case 'tests':
+        return testReportProblem(full, file);
+      default:
+        // `log`, `e2e` and `walkthrough`: a non-empty file is the proof (see the module comment).
+        return null;
+    }
+  } catch {
+    return `${file} could not be read`;
   }
 }
 

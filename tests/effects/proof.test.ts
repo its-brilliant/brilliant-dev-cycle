@@ -90,6 +90,17 @@ describe('checkProof', () => {
     expect(why('screenshot', undefined)).toBe('the screenshot proof does not name a file');
   });
 
+  // Root reads a 000 file anyway, so the case cannot be staged there.
+  it.skipIf(typeof process.getuid === 'function' && process.getuid() === 0)(
+    'says a proof file it cannot read could not be read',
+    () => {
+      const file = write('shots/locked.png', PNG);
+      fs.chmodSync(path.join(dir, file), 0o000);
+
+      expect(why('screenshot', file)).toBe('shots/locked.png could not be read');
+    },
+  );
+
   it.each([
     ['mp4', MP4],
     ['mov', MOV],
